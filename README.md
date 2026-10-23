@@ -37,26 +37,28 @@ The plugin **does not run an MCP server** and adds no REST routes of its own. It
 - PHP 8.1 or later
 - TranslatePress – Multilingual (free). Paid add-ons are not required.
 
-Tested with TranslatePress 3.3.x. On an untested TranslatePress database schema, write abilities disable themselves.
+Tested with TranslatePress 3.3.x. If TranslatePress's tables lack an expected column, the abilities that use them return `sat_schema_unsupported` instead of guessing.
 
 ## Abilities
 
 All abilities are in the `string-abilities/` namespace. A string is identified by its TranslatePress **`original_id`** plus a **language code** (e.g. `en_GB`). Statuses are `untranslated`, `machine` (machine-translated, including TranslatePress "similar" translations) and `human`.
 
-**Text matching is normalised, not exact.** TranslatePress stores source text as it appears in the page HTML, with entities and typographic punctuation. Lookups therefore ignore entity encoding, typographic vs straight apostrophes and quotes, non-breaking spaces and repeated whitespace. Case and accents still count.
+**Text matching is normalised, not exact.** TranslatePress stores source text as it appears in the page HTML, with entities and typographic punctuation. Lookups therefore ignore entity encoding, typographic vs straight apostrophes, quotes and dashes, non-breaking spaces and repeated whitespace. Case and accents still count. Returned `original` text is always as stored (e.g. `Don&#8217;t`).
 
-Read abilities only run plain database reads: they never trigger machine translation or create rows.
+Read abilities only run plain database reads: they never trigger machine translation or create rows. When TranslatePress holds several rows for one string in a language, the abilities use the row TranslatePress displays.
 
 Version 0.1–0.2 covers regular (page) strings. **Plugin and theme strings** (text plugins pass through WordPress translation functions, stored by TranslatePress in its gettext tables) are planned for 0.3.0 through an optional `source` parameter on the same abilities. URL slugs are not covered.
 
 ### Read
 
 #### `get-stats`
-Counts per language of untranslated, machine and human strings.
+Counts per language of untranslated, machine and human strings (one per string, duplicate rows counted once).
 
 | Input | Type | |
 |---|---|---|
 | `language` | string | optional; all translation languages if omitted |
+
+Returns `languages`: `{ "fr_FR": { "untranslated": 12, "machine": 340, "human": 85 }, … }`.
 
 #### `search-strings`
 Paged search within one language.
@@ -66,9 +68,9 @@ Paged search within one language.
 | `language` | string | required |
 | `status` | array of status | optional |
 | `query` | string | optional; substring of the original or the translation (normalised) |
-| `page`, `per_page` | integer | `per_page` ≤ 50 |
+| `page`, `per_page` | integer | default 1 and 20; `per_page` ≤ 50 |
 
-Returns `original_id`, `original`, `translated`, `status` for each match.
+Returns `items` (`original_id`, `original`, `translated`, `status`), `page`, `per_page` and `total`. With a `query`, at most 200 candidate strings are examined; `truncated` is `true` when there were more, so refine the query.
 
 #### `get-strings`
 Fetch specific strings in all (or some) languages at once.
@@ -79,10 +81,10 @@ Fetch specific strings in all (or some) languages at once.
 | `originals` | array of string | source-language text, ≤ 20, matched as described above |
 | `languages` | array of string | optional |
 
-Returns, per original, the stored source text and its translation and status in each language, plus `not_found` for texts that matched nothing. A warning `sat_duplicate_rows` flags strings for which TranslatePress holds more than one row in a language; the plugin always works on the row TranslatePress displays.
+Returns `items`: per original, `original_id`, the stored source text (`original`), `translations` as `{ "fr_FR": { "translated", "status" }, … }` and `warnings` (`code`, `language`, `message`); plus `not_found` for ids or texts that matched nothing. One text can match several strings. A language is missing from `translations` when TranslatePress has no row for that string in it yet. A warning `sat_duplicate_rows` flags strings for which TranslatePress holds more than one row in a language; the plugin always works on the row TranslatePress displays.
 
 #### `get-auto-translation-settings`
-Whether automatic translation is on (`enabled`), whether it is limited to the TranslatePress editor (`manual_only`), which engine, and for which languages. API keys, license data and notification email are never returned.
+Whether automatic translation is on (`enabled`), whether it is limited to the TranslatePress editor (`manual_only`), the engine slug (`engine`) and the translation languages (`languages`). Whether the engine supports each language is not checked (that lookup can make an HTTP call). API keys, license data and notification email are never returned.
 
 ### Write
 
@@ -138,9 +140,10 @@ Paged change history, filterable by `language`, `batch_id` and `since`.
 | Code | Meaning |
 |---|---|
 | `sat_invalid_language` | not a configured translation language, or the default language |
+| `sat_invalid_input` | input combination not allowed (e.g. both `original_ids` and `originals`) |
 | `sat_not_found` | unknown `original_id` |
 | `sat_writes_disabled` | read-only mode is on |
-| `sat_schema_unsupported` | TranslatePress database schema not recognised; writes disabled |
+| `sat_schema_unsupported` | TranslatePress database schema not recognised (a table lacks an expected column) |
 
 ## Recommended workflow for an agent
 

@@ -97,9 +97,9 @@ Stages 1 and 2 cover regular (page) strings. Stage 2b extends the same abilities
 | Ability | Input | Output |
 |---|---|---|
 | `get-stats` | `language?` | Per language: counts untranslated / machine / human |
-| `search-strings` | `language` (required), `status?` (array), `query?` (substring on original or translation, normalised per §5.4), `page`, `per_page` (≤ 50) | Items `original_id`, `original`, `translated`, `status`; paging |
+| `search-strings` | `language` (required), `status?` (array), `query?` (substring on original or translation, normalised per §5.4), `page`, `per_page` (≤ 50) | Items `original_id`, `original`, `translated`, `status`; paging (`page`, `per_page`, `total`, `truncated` when the §5.4 candidate cap was hit) |
 | `get-strings` | exactly one of `original_ids[]` or `originals[]` (text, ≤ 20 each, matched per §5.4); `languages?` | Per original: `original_id`, `original` (as stored), `translations` `{ lang: { translated, status } }`, `warnings[]` (e.g. `sat_duplicate_rows`); plus `not_found[]` |
-| `get-auto-translation-settings` | — | `enabled`, `manual_only`, `engine`, `languages` (translation languages minus default, intersected with the engine's cached supported list when present). Read with `get_option` and an explicit key allowlist; no TP method calls (they can make HTTP calls). **Never** API keys, license data or notification email |
+| `get-auto-translation-settings` | — | `enabled`, `manual_only`, `engine`, `languages` (translation languages minus default, **not** checked against engine support: TP's engine code mapping can make an HTTP call, owner decision at Stage 1, INTERNALS §10 item 18). Read with `get_option` and an explicit key allowlist; no TP method calls. **Never** API keys, license data or notification email |
 
 ### 5.2 Write — Stage 2
 
@@ -147,7 +147,7 @@ Warnings (never block):
 - `sat_identical_to_original` — translation equals the original (likely missed translation).
 - `sat_protected_term_missing` — a `protected_terms` entry present in the original is absent or altered in the translation (case-sensitive).
 
-Raised outside `Validator`: `sat_sanitization_changed` (error), `sat_duplicate_rows` (warning).
+Raised outside `Validator`: `sat_sanitization_changed` (error), `sat_duplicate_rows` (warning). Ability-level errors (`WP_Error`): `sat_invalid_language`, `sat_invalid_input` (e.g. both or neither of `original_ids` / `originals`), `sat_not_found`, `sat_writes_disabled`, `sat_schema_unsupported`.
 
 ### 5.4 Text normalisation (pure PHP, unit-tested)
 
