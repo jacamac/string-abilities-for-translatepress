@@ -145,11 +145,23 @@ final class ChangeLog {
 	 */
 	public static function entries( string $language, string $batch_id, string $since, int $page, int $per_page ): array {
 		global $wpdb;
-		$where = "(%s = '' OR language = %s) AND (%s = '' OR batch_id = %s) AND (%s = '' OR created_at >= %s)";
-		$args  = array( self::table(), $language, $language, $batch_id, $batch_id, $since, $since );
-		$total = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE ' . $where, $args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $where is a literal with placeholders; every value goes through prepare().
+		// Only the filters given: MySQL 8 rejects created_at >= '' outright,
+		// even inside an OR whose other side is true, and the query then fails.
+		$where = '1 = 1';
+		$args  = array( self::table() );
+		foreach ( array(
+			'language = %s'    => $language,
+			'batch_id = %s'    => $batch_id,
+			'created_at >= %s' => $since,
+		) as $condition => $value ) {
+			if ( '' !== $value ) {
+				$where .= ' AND ' . $condition;
+				$args[] = $value;
+			}
+		}
+		$total = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE ' . $where, $args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $where is built from literals with placeholders; every value goes through prepare().
 		$rows  = $wpdb->get_results(
-			$wpdb->prepare( 'SELECT * FROM %i WHERE ' . $where . ' ORDER BY id DESC LIMIT %d OFFSET %d', array_merge( $args, array( $per_page, ( $page - 1 ) * $per_page ) ) ), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $where is a literal with placeholders; every value goes through prepare().
+			$wpdb->prepare( 'SELECT * FROM %i WHERE ' . $where . ' ORDER BY id DESC LIMIT %d OFFSET %d', array_merge( $args, array( $per_page, ( $page - 1 ) * $per_page ) ) ), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $where is built from literals with placeholders; every value goes through prepare().
 			ARRAY_A
 		);
 		return array(

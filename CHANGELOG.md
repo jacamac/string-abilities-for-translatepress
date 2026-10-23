@@ -16,6 +16,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Changed
 - `dev-latest` builds are stamped `X.Y.Z-dev.<run>` in the zip only, with the committed version set to the next release, so a test site following `develop` is offered every build and the release replaces them. In branch mode the latest dev build stays offered even once installed (README).
 
+### Fixed
+- `get-change-log` always returned no entries: its query compared `created_at` with an empty date, which MySQL 8 rejects. Filters are now added only when given.
+
 ## [0.1.0] - 2026-10-23
 
 ### Added
