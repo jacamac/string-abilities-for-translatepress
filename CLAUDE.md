@@ -13,6 +13,7 @@ Full specification: `docs/REQUIREMENTS.md`. Read it before any work. This file h
 7. **Verify, don't assume.** Anything about TranslatePress internals or the Abilities API comes from `docs/SCHEMA.md` (Stage 0) or the source code, never from memory. If unsure, stop and ask.
 8. **README is the ability reference.** Any change to an ability's name, input, output, error or warning updates `README.md` in the same commit.
 9. **Every behaviour change adds a line to `CHANGELOG.md` under `Unreleased`.**
+10. **Read `docs/TRANSLATEPRESS-INTERNALS.md` before touching TranslatePress internals or the Abilities API.** When you learn something new about either, add it to that file with a file:line reference and mark it read-in-code or inferred. If the TranslatePress version changes, re-verify its references.
 
 ## Stages
 
