@@ -21,7 +21,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.1'
-          tools: none
+          tools: composer
 
       - name: Get version from tag
         id: version
@@ -33,14 +33,20 @@ jobs:
         run: bin/check-version.sh "$VERSION"
 
       # git archive honours export-ignore in .gitattributes: no tests, docs,
-      # dev config or dev dependencies in the zip.
+      # dev config or dev dependencies in the zip. Runtime dependencies only
+      # (Plugin Update Checker) are then installed into vendor/.
       - name: Build zip
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           mkdir -p /tmp/build
-          git archive --format=zip --prefix=string-abilities-for-translatepress/ \
-            -o "/tmp/build/string-abilities-for-translatepress-${VERSION}.zip" HEAD
+          git archive --format=tar --prefix=string-abilities-for-translatepress/ HEAD | tar -x -C /tmp/build
+          cp composer.json composer.lock /tmp/build/string-abilities-for-translatepress/
+          composer install --no-dev --prefer-dist --no-progress --no-interaction \
+            --working-dir=/tmp/build/string-abilities-for-translatepress
+          rm /tmp/build/string-abilities-for-translatepress/composer.json /tmp/build/string-abilities-for-translatepress/composer.lock
+          cd /tmp/build
+          zip -qr "string-abilities-for-translatepress-${VERSION}.zip" string-abilities-for-translatepress/
 
       - name: Smoke-test built zip
         env:
@@ -50,6 +56,7 @@ jobs:
           cd /tmp/smoke/string-abilities-for-translatepress
           find . -name '*.php' -print0 | xargs -0 -n1 php -l
           grep -q "Plugin Name:" string-abilities-for-translatepress.php
+          test -f vendor/yahnis-elsts/plugin-update-checker/plugin-update-checker.php
           test ! -e tests && test ! -e docs && test ! -e .github && test ! -e composer.json
           echo "Smoke test passed"
 

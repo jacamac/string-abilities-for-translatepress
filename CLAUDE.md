@@ -44,11 +44,13 @@ Where this repo differs, the spec wins, for these reasons:
 | Reference repo | Here | Why |
 |---|---|---|
 | Dev branch `development` | `develop`; same `dev-release.yml` rolling `dev-latest` zip, triggered from `develop` | Name only; the owner does not mind (spec §10) |
+| `dev-release.yml` triggered by `push` and runs its own lint job | Reusable workflow called by `ci.yml` after all CI jobs pass on a push to `develop` | "After CI passes"; `workflow_run` only fires from workflow files on the default branch |
+| Constant `BAC_UPDATE_BRANCH`; header keeps `GitHub Plugin URI` / `Primary Branch` | Constant `SAT_UPDATE_BRANCH`; no Git Updater headers | Prefix; spec §10 |
 | `ci.yml` only on PRs to `main` (lint on push via `dev-release.yml`) | `ci.yml` on every push and PR | Leak checks must run on every push (spec §9) |
 | No secret scanning, no deny-list check | gitleaks (binary, checksum-pinned) and `bin/check-private-terms.sh` in CI and pre-commit | Spec §9 |
 | `composer audit`, ESLint, Stylelint, `node --test` | PHPCS, PHPStan, PHPUnit, version check, leak checks — nothing else | Spec §9; no JS/CSS in this plugin |
 | Version injected from the tag at build time | Version committed in the three places; CI and `release.yml` fail if they differ from each other or from the tag | Spec §10 |
 | Release notes from the `readme.txt` changelog | Release notes from the `CHANGELOG.md` section | Spec §10 |
-| Zip built with an `rsync --exclude` list | Zip built with `git archive`, which honours `export-ignore` in `.gitattributes` | One exclusion list (spec §10 asks for `.gitattributes`) |
+| Zip built with an `rsync --exclude` list, then `composer install --no-dev` | `git archive` (honours `export-ignore` in `.gitattributes`), then the same `composer install --no-dev` for Plugin Update Checker | One exclusion list (spec §10 asks for `.gitattributes`) |
 | `phpcs.xml`, `phpstan.neon`; `CLAUDE.md` git-ignored | `*.dist` names; `CLAUDE.md` committed | Spec §10 repo file list |
 | PHP 7.4, WordPress 5.9, PHPStan 1.x, `Domain Path: /languages` | PHP 8.1, WordPress 6.9, PHPStan 2.x, no `languages/` | Spec §2; no translation files yet |

@@ -170,6 +170,8 @@ Report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
 
 Download the zip from the latest [GitHub release](https://github.com/jacamac/string-abilities-for-translatepress/releases) and install it via **Plugins → Add New → Upload Plugin**. After that, updates appear in the normal WordPress **Plugins** screen: the plugin checks this repository's GitHub releases itself (bundled [Plugin Update Checker](https://github.com/YahnisElsts/plugin-update-checker)).
 
+To follow development builds instead of tagged releases (test sites only), add `define( 'SAT_UPDATE_BRANCH', 'develop' );` to `wp-config.php`: updates then come from the rolling [`dev-latest`](https://github.com/jacamac/string-abilities-for-translatepress/releases/tag/dev-latest) pre-release.
+
 Uninstalling removes the plugin's change-log table and options. TranslatePress data is never touched.
 
 ## Development

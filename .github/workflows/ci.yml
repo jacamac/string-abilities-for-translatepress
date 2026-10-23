@@ -81,3 +81,11 @@ jobs:
 
       - name: PHPUnit
         run: ./vendor/bin/phpunit
+
+  dev-release:
+    name: Dev release
+    needs: [leaks, version, php]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/dev-release.yml

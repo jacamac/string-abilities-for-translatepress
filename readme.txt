@@ -35,7 +35,7 @@ Not affiliated with or endorsed by TranslatePress or Cozmoslabs.
 2. In WordPress, go to Plugins → Add New → Upload Plugin and install it.
 3. Activate. Administrators get the `sat_read` and `sat_manage` capabilities; a `translation_agent` role is created with only those plus `read`.
 
-The plugin also supports Git Updater.
+Updates then appear in the normal Plugins screen: the plugin checks its GitHub releases itself (bundled Plugin Update Checker).
 
 == Changelog ==
 

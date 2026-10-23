@@ -1,0 +1,68 @@
+name: Dev Release
+
+# Called by ci.yml after every CI job passes on a push to develop. Builds a
+# correctly named plugin zip and attaches it to the rolling 'dev-latest'
+# pre-release, so Plugin Update Checker on the dev site can update without a
+# version tag. (A workflow_run trigger would only fire from the default branch.)
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish dev-latest
+    runs-on: ubuntu-24.04  # pinned; move to a newer image deliberately
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          tools: composer
+
+      # Same build as release.yml: git archive honours export-ignore, then
+      # runtime dependencies only (Plugin Update Checker) go into vendor/.
+      - name: Build zip
+        run: |
+          mkdir -p /tmp/build
+          git archive --format=tar --prefix=string-abilities-for-translatepress/ HEAD | tar -x -C /tmp/build
+          cp composer.json composer.lock /tmp/build/string-abilities-for-translatepress/
+          composer install --no-dev --prefer-dist --no-progress --no-interaction \
+            --working-dir=/tmp/build/string-abilities-for-translatepress
+          rm /tmp/build/string-abilities-for-translatepress/composer.json /tmp/build/string-abilities-for-translatepress/composer.lock
+          cd /tmp/build
+          zip -qr string-abilities-for-translatepress.zip string-abilities-for-translatepress/
+
+      - name: Smoke-test built zip
+        run: |
+          unzip -q /tmp/build/string-abilities-for-translatepress.zip -d /tmp/smoke
+          cd /tmp/smoke/string-abilities-for-translatepress
+          find . -name '*.php' -print0 | xargs -0 -n1 php -l
+          grep -q "Plugin Name:" string-abilities-for-translatepress.php
+          test -f vendor/yahnis-elsts/plugin-update-checker/plugin-update-checker.php
+          test ! -e tests && test ! -e docs && test ! -e .github && test ! -e composer.json
+          echo "Smoke test passed"
+
+      - name: Update dev-latest pre-release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: dev-latest
+          target_commitish: ${{ github.sha }}
+          name: "Development Build (latest)"
+          prerelease: true
+          make_latest: false
+          files: /tmp/build/string-abilities-for-translatepress.zip
+          body: |
+            Automated development build — **not for production use**.
+
+            Branch: `develop`
+            Commit: `${{ github.sha }}`
+            Built: ${{ github.event.head_commit.timestamp }}
+
+            Install via **WordPress Admin → Plugins → Add New → Upload Plugin**,
+            or let Plugin Update Checker update automatically if `SAT_UPDATE_BRANCH` is set in `wp-config.php`.
