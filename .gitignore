@@ -1,0 +1,26 @@
+# Dependencies
+/vendor/
+/node_modules/
+
+# Build output
+/build/
+*.zip
+
+# Local environment and secrets
+.env
+.env.*
+.private-terms
+.wp-env.override.json
+
+# Tool caches
+.phpunit.result.cache
+.phpcs-cache
+/.phpstan-cache/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Downloaded third-party source used for Stage 0 discovery (never commit)
+/reference/
