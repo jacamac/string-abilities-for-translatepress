@@ -25,12 +25,27 @@ jobs:
           php-version: '8.1'
           tools: composer
 
+      # The committed version is the next release (e.g. 0.2.0). The zip, never
+      # the repo, is stamped X.Y.Z-dev.N: version_compare() orders it above the
+      # previous release and below X.Y.Z, so the release replaces it.
+      - name: Dev version
+        id: version
+        run: |
+          base="$(sed -n 's/^ \* Version: *\([^ ]*\) *$/\1/p' string-abilities-for-translatepress.php)"
+          echo "VERSION=${base}-dev.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
       # Same build as release.yml: git archive honours export-ignore, then
       # runtime dependencies only (Plugin Update Checker) go into vendor/.
       - name: Build zip
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           mkdir -p /tmp/build
           git archive --format=tar --prefix=string-abilities-for-translatepress/ HEAD | tar -x -C /tmp/build
+          cd /tmp/build/string-abilities-for-translatepress
+          sed -i "s/^ \* Version: .*$/ * Version:           ${VERSION}/; s/^define( 'SAT_VERSION', '[^']*' );$/define( 'SAT_VERSION', '${VERSION}' );/" string-abilities-for-translatepress.php
+          sed -i "s/^Stable tag: .*$/Stable tag:         ${VERSION}/" readme.txt
+          cd "$GITHUB_WORKSPACE"
           cp composer.json composer.lock /tmp/build/string-abilities-for-translatepress/
           composer install --no-dev --prefer-dist --no-progress --no-interaction \
             --working-dir=/tmp/build/string-abilities-for-translatepress
@@ -39,11 +54,16 @@ jobs:
           zip -qr string-abilities-for-translatepress.zip string-abilities-for-translatepress/
 
       - name: Smoke-test built zip
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           unzip -q /tmp/build/string-abilities-for-translatepress.zip -d /tmp/smoke
           cd /tmp/smoke/string-abilities-for-translatepress
           find . -name '*.php' -print0 | xargs -0 -n1 php -l
           grep -q "Plugin Name:" string-abilities-for-translatepress.php
+          grep -qx " \* Version:           ${VERSION}" string-abilities-for-translatepress.php
+          grep -qx "define( 'SAT_VERSION', '${VERSION}' );" string-abilities-for-translatepress.php
+          grep -qx "Stable tag:         ${VERSION}" readme.txt
           test -f vendor/yahnis-elsts/plugin-update-checker/plugin-update-checker.php
           test ! -e tests && test ! -e docs && test ! -e .github && test ! -e composer.json
           echo "Smoke test passed"
@@ -60,6 +80,7 @@ jobs:
           body: |
             Automated development build — **not for production use**.
 
+            Version: `${{ steps.version.outputs.VERSION }}`
             Branch: `develop`
             Commit: `${{ github.sha }}`
             Built: ${{ github.event.head_commit.timestamp }}

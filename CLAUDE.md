@@ -30,7 +30,7 @@ Mirror `github.com/jacamac/beds24-availability-calendar` (may be renamed to `ava
 
 - SemVer. `Version:` header = `SAT_VERSION` constant = `Stable tag:` in `readme.txt`; CI fails if they differ.
 - Branches: work on `develop`; `main` is releases only.
-- Release: merge to `main`, bump version, move `Unreleased` to the version in `CHANGELOG.md` (Keep a Changelog), sync `readme.txt`, commit `Release vX.Y.Z`, tag `vX.Y.Z`. `release.yml` builds the zip and the GitHub Release.
+- Release: merge to `main`, bump version (already done if the stage started by bumping it), move `Unreleased` to the version in `CHANGELOG.md` (Keep a Changelog), sync `readme.txt`, commit `Release vX.Y.Z`, tag `vX.Y.Z`. `release.yml` builds the zip and the GitHub Release.
 - Commit messages: imperative, short subject line (`Add get-stats ability`).
 - CI: PHPCS (WordPress), PHPStan level 6 with WordPress stubs, PHPUnit, version check, gitleaks, private-terms check. Nothing else.
 - The leak checks are the **first** thing set up in Stage 1, before any plugin code is committed.
@@ -50,6 +50,7 @@ Where this repo differs, the spec wins, for these reasons:
 | No secret scanning, no deny-list check | gitleaks (binary, checksum-pinned) and `bin/check-private-terms.sh` in CI and pre-commit | Spec §9 |
 | `composer audit`, ESLint, Stylelint, `node --test` | PHPCS, PHPStan, PHPUnit, version check, leak checks — nothing else | Spec §9; no JS/CSS in this plugin |
 | Version injected from the tag at build time | Version committed in the three places; CI and `release.yml` fail if they differ from each other or from the tag | Spec §10 |
+| Dev zip carries the committed version unchanged. PUC branch mode compares the installed version with the `Version:` header of the main file **on the branch** (`vendor/yahnis-elsts/plugin-update-checker/Puc/v5p7/Vcs/PluginUpdateChecker.php:79-85`), so a dev build is offered only after the header was bumped | The committed version is bumped to the next release at the start of a stage (e.g. `0.2.0`); `dev-release.yml` stamps the zip only, never the repo, with `X.Y.Z-dev.<run_number>` (`version_compare`: above the previous release, below `X.Y.Z`). Side effect: once a dev build is installed, the branch header (`X.Y.Z`) stays higher, so the dev site always shows an update to `X.Y.Z` that reinstalls the latest dev zip | Dev site on `0.1.0` must be offered each Stage 2 build; the release replaces the dev builds (owner, Stage 2) |
 | Release notes from the `readme.txt` changelog | Release notes from the `CHANGELOG.md` section | Spec §10 |
 | Zip built with an `rsync --exclude` list, then `composer install --no-dev` | `git archive` (honours `export-ignore` in `.gitattributes`), then the same `composer install --no-dev` for Plugin Update Checker | One exclusion list (spec §10 asks for `.gitattributes`) |
 | `phpcs.xml`, `phpstan.neon`; `CLAUDE.md` git-ignored | `*.dist` names; `CLAUDE.md` committed | Spec §10 repo file list |
