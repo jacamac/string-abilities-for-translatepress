@@ -344,3 +344,140 @@ A future purge could call `TRP_Regular_Delete` after snapshotting rows, but none
 | D | Fire `trp_save_editor_translations_regular_strings` after a real write, with the editor's argument shape? There are no listeners in free TP; paid add-ons are unknown. | Do not fire in v1 (minimum code, no unknown side effects); revisit if an add-on needs it. |
 | E | `get-strings` `context`: free TP only offers partial post IDs (§8). | Omit `context` in v1; README and LATER unchanged. |
 | F | `manual_translation_only` changes whether `enabled` actually re-translates (§9, §10). | Leave it out of v1 output. Mention it in the `reset` description. |
+
+---
+
+## 14. Gettext strings (Stage 2b discovery)
+
+Answers to REQUIREMENTS §5.5, read in TranslatePress 3.3.8 (same archive as above). Extra paths: `P` = `TP/includes/gettext/class-process-gettext.php`, `M` = `TP/includes/gettext/class-gettext-manager.php`, `IU` = `TP/includes/queries/class-gettext-insert-update.php`, `Q` = `TP/includes/queries/class-query.php`.
+
+### 14.1 Tables, columns and addressing
+
+**Per-language table** `{prefix}trp_gettext_{lang}` (lower-cased locale, **no default-language part**), built by `TRP_Query::get_gettext_table_name()`, filter `trp_table_name_gettext`; invalid codes return the sentinel `trp_language_code_is_invalid_error` (`Q:1484-1490`). Created in `check_gettext_table()` (`TP/includes/queries/class-gettext-table-creation.php:47-57`):
+
+| Column | Type |
+|---|---|
+| `id` | `bigint(20) AUTO_INCREMENT PRIMARY KEY` |
+| `original` | `longtext NOT NULL` (legacy copy of the text) |
+| `translated` | `longtext` (nullable) |
+| `domain` | `longtext` (legacy copy) |
+| `status` | `int(20)` (no default) |
+| `original_id` | `bigint(20)` (nullable) |
+| `plural_form` | `int(20)` (nullable) |
+
+Indexes: **UNIQUE `gettext_original_plural_unique (original_id, plural_form)`**, `index_name (original(100))`, FULLTEXT on `original` (`:56`, `:63-68`). On older sites the unique index is added by the gettext optimisation migration; `gettext_tables_optimization_is_ready()` checks for it on every gettext table (`TP/includes/class-upgrade.php:548-584`).
+
+**A gettext table exists for the default language too**: the default language is always part of `translation-languages` (`TP/includes/class-settings.php:236-237`), and gettext overrides are applied in it (§14.2; only the marker wrapping is skipped there, `P:274`).
+
+**Originals** `{prefix}trp_gettext_original_strings` (`Q:1177-1179`, `class-gettext-table-creation.php:87-107`): `id` PK, `original TEXT NOT NULL`, `domain TEXT NOT NULL`, `context TEXT NULL`, `original_plural TEXT NULL`, `lookup_hash char(32) NOT NULL` (UNIQUE). `lookup_hash = md5( original . "\x1F" . domain . "\x1F" . context )` where an empty or `NULL` context is replaced by the sentinel **`trp_context`** (`Q:1229-1244`). One originals row is therefore one (original, domain, context) triple; the plural text hangs off it.
+
+**Meta** `{prefix}trp_gettext_original_meta`: `meta_id`, `original_id`, `meta_key`, `meta_value` (`class-gettext-table-creation.php:124-130`). The gettext scan writes `in_email = yes` there (`TP/includes/string-translation/class-gettext-scan.php:153-159`).
+
+**Addressing.** A translation row is `gettext_{lang}.original_id = gettext_original_strings.id` plus `plural_form`. The unique key means **one row per (`original_id`, `plural_form`) per language**: no duplicate-row problem like decision A, as long as the unique index exists. Rows with `original_id` `NULL` or `0` are pre-migration legacy rows, matched by TP only by `original` + `domain` + `plural_form` text (`Q:1382-1391`); they cannot be addressed by `original_id`.
+
+TP's runtime and editor read `original`/`domain` from the originals table and fall back to the legacy columns only when the join is empty (`Q:1305-1310`, `M:67-71`).
+
+### 14.2 Rendering: TP table vs the plugin's own `.mo` file
+
+WordPress computes the translation from the loaded `.mo` first; TP filters it afterwards at priority 100 on `gettext`, `gettext_with_context`, `ngettext`, `ngettext_with_context` (`M:164-182`).
+
+1. On `init`, `create_gettext_translated_global()` loads the language's rows into a request map keyed `context::plural_form::domain::original` (`M:44-82`, hook `TP/class-translate-press.php:517`). Normally it uses **`get_runtime_gettext_strings()`**, which loads only rows with `translated <> ''` and **`status IN (1, 2)`** (`Q:1318-1340`; docblock: "Language-file matches use status 4 and are intentionally left to WordPress gettext"). Before the runtime-status migration has finished, or in editor preview, it loads every row instead (`M:59-61`, `M:138-141`).
+2. In `process_gettext_strings()`, when a map row exists with a non-empty translation **different from what WordPress returned** and `is_sprintf_compatible()`, TP replaces WordPress's text with `trp_sanitize_string( $row['translated'] )` (`P:196-208`).
+
+**Answer: yes, a status-2 row with a non-empty translation overrides the `.mo` translation**, for every request processed in that language. A status-4 row is never loaded, so WordPress's current `.mo` text is served. The override applies even when the domain's `.mo` is not loaded in that locale (`P:179-181` only resets WordPress's value to the original; step 2 still runs).
+
+Conditions under which TP does **not** apply the override (so a write has no visible effect):
+- The stored text fails `is_sprintf_compatible()` against the reference text (14.6). TP **silently falls back** to the `.mo`/original; no error is shown.
+- Domain `translatepress-multilingual`, `trp-edit-translation=true`, or AJAX actions starting with `trp_` (`P:117-122`).
+- Strings that are empty or only punctuation/digits after a trim (`P:109-113`).
+- wp-admin, `wp-login.php`, `xmlrpc.php` (`processing_gettext_is_needed()`, `M:143-162`).
+- The current locale is not a TP language (`P:139-143`).
+
+No object cache or transient is involved (none in `includes/gettext/` or the gettext queries); the map is rebuilt from the database on every request. Full-page caches apply as for regular strings (§7).
+
+**Stale status-4 text.** A status-4 row's `translated` is a snapshot of the `.mo` taken when TP first saw the string (`P:802-825`, `M:473-495`); it is not used at render, so after a plugin update the displayed text can differ from the stored one [inferred].
+
+### 14.3 Statuses and render-time inserts
+
+| Value | Gettext meaning | Written by |
+|---|---|---|
+| 0 | not translated (`translated` NULL/`''`) | `insert_gettext_strings()` when the translation equals the original/plural or is empty (`IU:58-61`); editor save with empty text (`TP/includes/class-editor-api-gettext-strings.php:93`) |
+| 1 | machine translated | gettext machine translation at shutdown (`M:546-630`, queue status at `P:739`, `M:528`) |
+| 2 | human: overrides the `.mo` | editor save with non-empty text (`class-editor-api-gettext-strings.php:93`); insert with no explicit status (`IU:62-65`); the runtime-status migration for rows whose text differs from the `.mo` (`TP/includes/class-upgrade.php:1406-1434`) |
+| 4 | text comes from the language file | first sighting with a `.mo` translation (`P:802-825`, `P:601-611`), back-fill when a `.mo` translation appears later (`P:210-219`, `M:473-495`) |
+
+Status 3 (similar) is never used for gettext (no reference in the gettext classes). TP's String Translation labels 4 "Gettext file translation" (`TP/includes/string-translation/class-string-translation.php:178`).
+
+**Rows are inserted at render time, and machine translation spends quota then:**
+- Each front-end request in a TP language collects strings missing from the map (`P:242`, `P:802-825`) and, at `shutdown`, inserts the missing rows and updates status-0 rows that now have a `.mo` translation (`M:345-412`, hook `TP/class-translate-press.php:520`).
+- Strings with no `.mo` translation are queued and machine-translated at shutdown when automatic translation is available, never into a language whose ISO code is `en` (`P:687-744`, `P:886-906`, `M:546-630`), sharing the request time budget (`M:576-579`).
+- Editor preview inserts rows synchronously (`P:228-240`, `P:591-625`).
+- String Translation's "missing gettext strings" AJAX inserts rows for **every other plural form** from the `.mo` (`TP/includes/string-translation/class-string-translation-api-gettext.php:55-91` → `M:782-912`).
+- Instantiating plural forms can `update_option( 'trp_db_stored_data' )` (`TP/includes/gettext/class-plural-forms.php:67-98`).
+
+**Impact:** gettext reads must be direct `SELECT`s, as for regular strings. Never call `TRP_Process_Gettext`, `TRP_Gettext_Manager`, `TRP_Plural_Forms`, the editor or the String Translation gettext API. `get_gettext_table_name()` and `get_table_name_for_gettext_original_strings()` are pure (name + filter) and safe.
+
+### 14.4 Plural forms
+
+- `_n()`/`_nx()` pass `$number`; TP turns it into an index with the language's `Plural-Forms` header (`P:145`, `TP/includes/gettext/class-plural-forms.php:39-45`, `:101-119`). Without a number (`__()`, `_x()`), the index is 0.
+- The header comes from `trp_db_stored_data['gettext_plural_forms_header'][lang]`, filled once from WordPress core's `default` text domain for that locale, fallback `nplurals=2; plural=n != 1;` (`class-plural-forms.php:67-98`, `:111-119`).
+- **One row per plural form index that has actually been rendered** (or back-filled by String Translation, 14.3), keyed by (`original_id`, `plural_form`). A language with three forms may have one, two or three rows.
+- The singular is `original`, the plural is `original_plural` on the originals row. For `plural_form > 0`, TP's sprintf reference is **`original_plural`** (`P:202`, `P:232`, `M:565`); machine translation sends `original_plural` for those rows (`M:565`).
+- The override replaces the whole string: `str_replace( trim( $text ), $translated, $text )` with the singular `$text` (`P:204`) [inferred: effectively the stored text].
+
+**Impact:** plural rows are as safe to write as singular ones, provided `Validator` compares a `plural_form > 0` row against `original_plural`. No scope reduction is needed. "No row, no write" applies per plural form.
+
+### 14.5 How the gettext editor saves
+
+`wp_ajax_trp_save_translations_gettext` → `TRP_Editor_Api_Gettext_Strings::gettext_save_translations()` (`TP/class-translate-press.php:372`, `class-editor-api-gettext-strings.php:81-125`):
+
+1. capability `trp_translating_capability` (default `manage_options`), nonce, languages restricted to `translation-languages` **including the default language** (`:82-88`);
+2. `translated = trp_sanitize_string( $translated )` (strip script, strip `%xx`, `wp_kses_post`); **status = 2 if non-empty, else 0** (`:92-93`). No URL special case, unlike regular strings;
+3. `update_gettext_strings( …, array( 'id', 'translated', 'status' ) )`: an `INSERT … ON DUPLICATE KEY UPDATE` upsert on `id` (`IU:354-419`);
+4. `remove_possible_duplicates( …, 'gettext' )`: a **DELETE** of other rows with the same binary `original` + `domain` + `plural_form`, **ignoring context** (`Q:2049-2085`, condition at `:2078`) [inferred: can delete a different context's row];
+5. `do_action( 'trp_save_editor_translations_gettext_strings', … )` (`:120`). **No listener in free TP** (grep of the whole plugin).
+
+The editor has no approve action and does not distinguish status 4: re-saving a status-4 text turns it into 2.
+
+**Impact:** same mechanics as §5 for regular strings: a conditional `UPDATE {gettext} SET translated, status WHERE id AND original_id AND plural_form AND BINARY COALESCE(translated,'') = %s AND status = %d`; never insert, never delete, skip steps 4 and 5 (decision D applies); same `Validator` → `wp_kses` → `trp_sanitize_string()` pipeline and `sat_sanitization_changed`.
+
+### 14.6 Placeholders
+
+TP's guard `is_sprintf_compatible( $translated, $reference )` (`P:1052-1089`, filter `trp_check_sprintf_compatibility`):
+- token pattern `%(?:\d+\$)?[-+0 #]*(?:'.)?\d*(?:\.\d+)?[bcdeEfFgGhHosuxX%]`, `%%` dropped;
+- **both lists sorted and compared for equality**: same tokens, same multiplicity, any order. `%s %s` → `%1$s %2$s` and `%s` → `%d` are both rejected, although the count is equal.
+
+So with TP's check on, a placeholder mismatch does not cause a PHP error through TP's override path; the translation is **silently not shown**. The PHP-error risk exists only if a site turns the filter off, or if the plugin itself uses the stored text elsewhere [inferred].
+
+`Validator` today compares the **count** only (`src/Validator.php`, `placeholder_count()`), with a slightly different pattern (no `'x` padding, no `h`/`H`). A gettext write that passes `Validator` could therefore be stored and never rendered.
+
+Also: `trp_sanitize_string()` removes `%xx` hex pairs, so tokens such as `%02d` or `%1d` are stripped at render (`P:204`, `TP/includes/functions.php:213-221`). The existing `sat_sanitization_changed` check already rejects such writes.
+
+**Impact:** for gettext, `sat_placeholder_mismatch` must use TP's rule (sorted token lists equal, TP's pattern), against `original` or `original_plural` (14.4).
+
+### 14.7 Text identity and matching
+
+- Gettext originals are the raw PHP strings passed to `__()` etc., after TP strips nested markers (`P:105-106`); they are **not** HTML-escaped by TP [inferred from the call path: no encoding step between the filter argument and the insert]. `Validator::normalize()` still applies for text lookup.
+- Exact lookup for `get-strings` by text: `BINARY original` on `gettext_original_strings`, optional `domain`, optional `context` (an empty or absent context is stored as `NULL`, `''` or `trp_context`; compare via `COALESCE(NULLIF(context,''),'trp_context')` as TP does, `Q:1417`).
+- Output `context`: `null` for `NULL`, `''` and `trp_context`.
+
+### 14.8 Schema guard inputs (gettext)
+
+- `trp_gettext_{lang}`: `id`, `original_id`, `plural_form`, `translated`, `status`, `domain`.
+- `trp_gettext_original_strings`: `id`, `original`, `domain`, `context`, `original_plural`.
+- Index `gettext_original_plural_unique` on each gettext table (guarantees one row per address; TP itself treats its absence as "migration not done", `class-upgrade.php:580`).
+
+### 14.9 Open questions for the owner (Stage 2b)
+
+| | Question | Recommendation |
+|---|---|---|
+| G1 | Status 4 has no place in the three exposed statuses. | Expose it as a fourth status **`language_file`** for gettext (filterable in `search-strings`, counted in `get-stats`). |
+| G2 | Rules on a `language_file` row. | `translate`: allowed, becomes `human` (that is the override); no `overwrite_reviewed` needed. `approve`: outcome `unchanged`, not written (writing 2 would freeze today's `.mo` text and ignore later plugin updates). `reset`: allowed; describe that TP refills it from the `.mo` (status 4) on the next view, so it is effectively a no-op. |
+| G3 | `reset` on a `human` gettext row. | Allowed with `overwrite_reviewed`, as for regular. Description: the `.mo` text returns on the next view if one exists, otherwise machine translation (if on) or the original. |
+| G4 | Placeholder rule: TP's sorted-token equality is stricter than the current count check. | Use TP's rule **for both sources** (one rule, simpler, and harmless for regular strings, which rarely carry printf tokens). Adds 2 `ValidatorTest` cases (reordered positional tokens pass; `%s`→`%d` fails). Alternative: gettext only. |
+| G5 | Default language: TP has a gettext table for it and applies overrides there (changes the site's source-language UI text). | Keep the §5.2 rule: default language rejected for gettext too (`sat_invalid_language`). |
+| G6 | Legacy rows with `original_id` `NULL`/`0`. | Exclude from reads and writes, as regular rows with `original_id > 0` only. |
+| G7 | Missing `gettext_original_plural_unique` index. | Treat as schema mismatch: gettext writes return `sat_schema_unsupported`; reads still work. Then no duplicate-row logic is needed for gettext. |
+| G8 | `Strings.php` is already 511 lines; gettext adds a parallel set of queries. | Add `src/Gettext.php` for the gettext table access (mirrors `Strings`), keep one schema guard in `Strings`. Record the split in REQUIREMENTS §8. |
+
+No part of §5.5 is unsafe or pointless: plural writes are safe with the right reference text (14.4), and status-2 writes do override the `.mo` (14.2). The scope is unchanged, subject to G1–G8.

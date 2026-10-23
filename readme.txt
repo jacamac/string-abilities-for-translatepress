@@ -4,7 +4,7 @@ Tags:               translatepress, translation, abilities, ai, mcp
 Requires at least:  6.9
 Tested up to:       7.1
 Requires PHP:       8.1
-Stable tag:         0.2.0
+Stable tag:         0.3.0
 License:            GPLv2 or later
 License URI:        https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -25,6 +25,8 @@ Abilities:
 * `update-translations` – translate, approve or reset strings in several languages at once. Dry run by default; a write fails if the translation changed since it was read; human translations are protected; HTML and placeholders are checked.
 * `revert` – undo one change or a whole batch.
 * `get-change-log` – history of the changes.
+
+`get-stats`, `search-strings`, `get-strings`, `update-translations` and `get-change-log` also work on plugin and theme strings (`source: gettext`).
 
 Reads are plain database queries: they never trigger machine translation or create rows. Writes only update existing rows; they never insert or delete TranslatePress rows or touch source text. Define `SAT_READ_ONLY` to disable writes. The full reference is in README.md on GitHub.
 

@@ -27,7 +27,26 @@ final class Plugin {
 	 */
 	public const STATUS = array(
 		'type' => 'string',
-		'enum' => array( 'untranslated', 'machine', 'human' ),
+		'enum' => array( 'untranslated', 'machine', 'human', 'language_file' ),
+	);
+
+	/**
+	 * Schema of the string source (REQUIREMENTS §5.5).
+	 */
+	public const SOURCE = array(
+		'type'        => 'string',
+		'enum'        => array( 'regular', 'gettext' ),
+		'default'     => 'regular',
+		'description' => 'regular: page strings (default). gettext: plugin and theme strings passed through WordPress translation functions.',
+	);
+
+	/**
+	 * Schema of a gettext text domain filter.
+	 */
+	public const DOMAIN = array(
+		'type'        => 'string',
+		'minLength'   => 1,
+		'description' => 'Optional, gettext only: text domain of one plugin or theme.',
 	);
 
 	/**
@@ -40,6 +59,7 @@ final class Plugin {
 
 	private const MATCHING  = 'Text matching is normalised, not exact: entity encoding, typographic vs straight apostrophes, quotes and dashes, an ellipsis vs three dots, non-breaking spaces and repeated whitespace are ignored; case and accents count.';
 	private const READ_ONLY = 'Plain database read: never triggers machine translation and never creates rows.';
+	private const GETTEXT   = 'With source gettext: plugin and theme strings, each identified by original_id (of TranslatePress\'s gettext originals, a separate numbering) and plural_form, with domain, context and original_plural (the plural text, which plural forms above 0 translate). Status language_file means the text comes from the plugin\'s own translation file (.mo); human overrides it.';
 
 	/**
 	 * Hook registration into the Abilities API.
@@ -103,7 +123,14 @@ final class Plugin {
 				'untranslated' => array( 'type' => 'integer' ),
 				'machine'      => array( 'type' => 'integer' ),
 				'human'        => array( 'type' => 'integer' ),
-			)
+			),
+			array( 'language_file' => array( 'type' => 'integer' ) )
+		);
+		$gettext    = array(
+			'plural_form'     => array( 'type' => 'integer' ),
+			'original_plural' => array( 'type' => array( 'string', 'null' ) ),
+			'domain'          => array( 'type' => 'string' ),
+			'context'         => array( 'type' => array( 'string', 'null' ) ),
 		);
 		$text_entry = self::object(
 			array(
@@ -115,8 +142,16 @@ final class Plugin {
 		self::register(
 			'get-stats',
 			__( 'Get translation statistics', 'string-abilities-for-translatepress' ),
-			'Counts of untranslated, machine and human strings per translation language (one per string; "machine" includes TranslatePress "similar" translations). ' . self::READ_ONLY,
-			self::input( array( 'language' => array_merge( $language, array( 'description' => 'Optional; all translation languages if omitted.' ) ) ), array(), true ),
+			'Counts of untranslated, machine and human strings per translation language (one per string; "machine" includes TranslatePress "similar" translations). With source gettext, one per string and plural form, plus language_file, optionally for one text domain. ' . self::READ_ONLY,
+			self::input(
+				array(
+					'language' => array_merge( $language, array( 'description' => 'Optional; all translation languages if omitted.' ) ),
+					'source'   => self::SOURCE,
+					'domain'   => self::DOMAIN,
+				),
+				array(),
+				true
+			),
 			self::object(
 				array(
 					'languages' => array(
@@ -131,7 +166,7 @@ final class Plugin {
 		self::register(
 			'search-strings',
 			__( 'Search strings', 'string-abilities-for-translatepress' ),
-			'Paged search of strings in one language, by status and/or a substring of the original or the translation. ' . self::MATCHING . ' Exception: this search ignores case. A query looks at no more than ' . Strings::CANDIDATE_CAP . ' candidate strings; truncated is true when there were more. ' . self::UNTRUSTED . ' ' . self::READ_ONLY,
+			'Paged search of strings in one language, by status and/or a substring of the original or the translation (with source gettext also the plural original, and optionally one text domain). ' . self::MATCHING . ' Exception: this search ignores case. A query looks at no more than ' . Strings::CANDIDATE_CAP . ' candidate strings; truncated is true when there were more. ' . self::GETTEXT . ' ' . self::UNTRUSTED . ' ' . self::READ_ONLY,
 			self::input(
 				array(
 					'language' => $language,
@@ -145,6 +180,8 @@ final class Plugin {
 						'type'        => 'string',
 						'description' => 'Optional substring of the original or the translation.',
 					),
+					'source'   => self::SOURCE,
+					'domain'   => self::DOMAIN,
 					'page'     => array(
 						'type'    => 'integer',
 						'minimum' => 1,
@@ -169,7 +206,8 @@ final class Plugin {
 								'original'    => array( 'type' => 'string' ),
 								'translated'  => array( 'type' => 'string' ),
 								'status'      => $status,
-							)
+							),
+							$gettext
 						),
 					),
 					'page'      => array( 'type' => 'integer' ),
@@ -184,7 +222,7 @@ final class Plugin {
 		self::register(
 			'get-strings',
 			__( 'Get strings', 'string-abilities-for-translatepress' ),
-			'Specific strings with their translation and status in each language. Pass exactly one of original_ids or originals (source-language text). ' . self::MATCHING . ' TranslatePress stores source text as it appears in the page HTML, so a text may match several strings or none (then it is listed in not_found). A language is absent from translations when TranslatePress has no row for it yet. Warning sat_duplicate_rows flags a language holding several rows for the string; the one TranslatePress displays is returned. ' . self::UNTRUSTED . ' ' . self::READ_ONLY,
+			'Specific strings with their translation and status in each language. Pass exactly one of original_ids or originals (source-language text). ' . self::MATCHING . ' TranslatePress stores source text as it appears in the page HTML, so a text may match several strings or none (then it is listed in not_found). A language is absent from translations when TranslatePress has no row for it yet. Warning sat_duplicate_rows flags a language holding several rows for the string; the one TranslatePress displays is returned. ' . self::GETTEXT . ' With source gettext there is one item per original_id and plural_form that has a row in a requested language, and originals can be narrowed by domain and context. ' . self::UNTRUSTED . ' ' . self::READ_ONLY,
 			self::input(
 				array(
 					'original_ids' => array(
@@ -206,6 +244,13 @@ final class Plugin {
 						'maxItems' => 20,
 					),
 					'languages'    => array_merge( $languages, array( 'description' => 'Optional; all translation languages if omitted.' ) ),
+					'source'       => self::SOURCE,
+					'domain'       => array_merge( self::DOMAIN, array( 'description' => 'Optional, gettext with originals only: text domain the text must belong to.' ) ),
+					'context'      => array(
+						'type'        => 'string',
+						'minLength'   => 1,
+						'description' => 'Optional, gettext with originals only: gettext context (_x) the text must have.',
+					),
 				)
 			),
 			self::object(
@@ -230,7 +275,8 @@ final class Plugin {
 										)
 									),
 								),
-							)
+							),
+							$gettext
 						),
 					),
 					'not_found' => array(
@@ -272,8 +318,9 @@ final class Plugin {
 	 */
 	public static function get_stats( $input ) {
 		$input   = (array) $input;
+		$source  = self::source( $input );
 		$strings = new Strings();
-		$error   = $strings->schema_error();
+		$error   = self::gettext_only_error( $input, $source, array( 'domain' ) ) ?? $strings->schema_error( $source );
 		if ( $error ) {
 			return $error;
 		}
@@ -284,7 +331,7 @@ final class Plugin {
 		}
 		$stats = array();
 		foreach ( $languages as $language ) {
-			$stats[ $language ] = $strings->stats( $language );
+			$stats[ $language ] = 'gettext' === $source ? ( new Gettext() )->stats( $language, (string) ( $input['domain'] ?? '' ) ) : $strings->stats( $language );
 		}
 		return array( 'languages' => (object) $stats );
 	}
@@ -297,21 +344,20 @@ final class Plugin {
 	 */
 	public static function search_strings( $input ) {
 		$input    = (array) $input;
+		$source   = self::source( $input );
 		$strings  = new Strings();
 		$language = (string) ( $input['language'] ?? '' );
-		$error    = $strings->schema_error() ?? self::language_error( $strings, array( $language ) );
+		$error    = self::gettext_only_error( $input, $source, array( 'domain' ) ) ?? $strings->schema_error( $source ) ?? self::language_error( $strings, array( $language ) );
 		if ( $error ) {
 			return $error;
 		}
 		$page     = max( 1, (int) ( $input['page'] ?? 1 ) );
 		$per_page = min( 50, max( 1, (int) ( $input['per_page'] ?? 20 ) ) );
-		$result   = $strings->search(
-			$language,
-			array_values( array_map( 'strval', (array) ( $input['status'] ?? array() ) ) ),
-			(string) ( $input['query'] ?? '' ),
-			$page,
-			$per_page
-		);
+		$statuses = array_values( array_map( 'strval', (array) ( $input['status'] ?? array() ) ) );
+		$query    = (string) ( $input['query'] ?? '' );
+		$result   = 'gettext' === $source
+			? ( new Gettext() )->search( $language, $statuses, $query, (string) ( $input['domain'] ?? '' ), $page, $per_page )
+			: $strings->search( $language, $statuses, $query, $page, $per_page );
 		return array(
 			'items'     => $result['items'],
 			'page'      => $page,
@@ -332,9 +378,14 @@ final class Plugin {
 		if ( isset( $input['original_ids'] ) === isset( $input['originals'] ) ) {
 			return new WP_Error( 'sat_invalid_input', __( 'Pass exactly one of original_ids or originals.', 'string-abilities-for-translatepress' ), array( 'status' => 400 ) );
 		}
+		$source    = self::source( $input );
 		$strings   = new Strings();
+		$gettext   = new Gettext();
 		$languages = isset( $input['languages'] ) ? array_values( array_unique( array_map( 'strval', (array) $input['languages'] ) ) ) : $strings->languages();
-		$error     = $strings->schema_error() ?? self::language_error( $strings, $languages );
+		$error     = self::gettext_only_error( $input, $source, array( 'domain', 'context' ) ) ?? $strings->schema_error( $source ) ?? self::language_error( $strings, $languages );
+		if ( ! $error && isset( $input['original_ids'] ) && ( isset( $input['domain'] ) || isset( $input['context'] ) ) ) {
+			$error = new WP_Error( 'sat_invalid_input', __( 'domain and context narrow originals only, not original_ids.', 'string-abilities-for-translatepress' ), array( 'status' => 400 ) );
+		}
 		if ( $error ) {
 			return $error;
 		}
@@ -342,17 +393,26 @@ final class Plugin {
 		$not_found = array();
 		if ( isset( $input['original_ids'] ) ) {
 			$ids       = array_values( array_unique( array_map( 'intval', (array) $input['original_ids'] ) ) );
-			$originals = $strings->originals_by_id( $ids );
+			$originals = 'gettext' === $source ? $gettext->originals_by_id( $ids ) : $strings->originals_by_id( $ids );
 			$not_found = array_values( array_diff( $ids, array_keys( $originals ) ) );
 		} else {
 			$originals = array();
 			foreach ( array_map( 'strval', (array) $input['originals'] ) as $text ) {
-				$found = $strings->originals_by_text( $text );
+				$found = 'gettext' === $source
+					? $gettext->originals_by_text( $text, (string) ( $input['domain'] ?? '' ), (string) ( $input['context'] ?? '' ) )
+					: $strings->originals_by_text( $text );
 				if ( array() === $found ) {
 					$not_found[] = $text;
 				}
 				$originals += $found;
 			}
+		}
+		if ( 'gettext' === $source ) {
+			ksort( $originals );
+			return array(
+				'items'     => $gettext->items( $originals, $languages ),
+				'not_found' => $not_found,
+			);
 		}
 
 		$items = array();
@@ -397,6 +457,40 @@ final class Plugin {
 	 */
 	public static function get_auto_translation_settings(): array {
 		return ( new Strings() )->auto_translation_settings();
+	}
+
+	/**
+	 * Source of an input or item: gettext, or regular by default.
+	 *
+	 * @param array<string, mixed> $input Input or item.
+	 * @return string regular or gettext.
+	 */
+	public static function source( array $input ): string {
+		return 'gettext' === ( $input['source'] ?? 'regular' ) ? 'gettext' : 'regular';
+	}
+
+	/**
+	 * Error if a gettext-only property is given for regular strings.
+	 *
+	 * @param array<string, mixed> $input  Input or item.
+	 * @param string               $source regular or gettext.
+	 * @param string[]             $keys   Gettext-only property names.
+	 * @return WP_Error|null
+	 */
+	public static function gettext_only_error( array $input, string $source, array $keys ): ?WP_Error {
+		$given = array_values( array_intersect( $keys, array_keys( $input ) ) );
+		if ( 'gettext' === $source || array() === $given ) {
+			return null;
+		}
+		return new WP_Error(
+			'sat_invalid_input',
+			sprintf(
+				/* translators: %s: comma-separated property names. */
+				__( 'Only with source gettext: %s.', 'string-abilities-for-translatepress' ),
+				implode( ', ', $given )
+			),
+			array( 'status' => 400 )
+		);
 	}
 
 	/**
@@ -485,15 +579,16 @@ final class Plugin {
 	}
 
 	/**
-	 * Object output schema whose properties are all required.
+	 * Object output schema whose properties are all required, plus optional ones.
 	 *
-	 * @param array<string, mixed> $properties Properties.
+	 * @param array<string, mixed> $properties Required properties.
+	 * @param array<string, mixed> $optional   Optional properties.
 	 * @return array<string, mixed>
 	 */
-	public static function object( array $properties ): array {
+	public static function object( array $properties, array $optional = array() ): array {
 		return array(
 			'type'       => 'object',
-			'properties' => $properties,
+			'properties' => $properties + $optional,
 			'required'   => array_keys( $properties ),
 		);
 	}

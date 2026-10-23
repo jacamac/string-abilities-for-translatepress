@@ -13,6 +13,7 @@ Ideas deliberately left out of v1. Each one is built only when a real need shows
 | Cleaning duplicate rows | TranslatePress has its own tool; the plugin only reports them |
 | Engine language support in `get-auto-translation-settings` | TranslatePress's per-engine code mapping can make an HTTP call (INTERNALS §10 item 18); v1 returns the configured languages unfiltered |
 | Exclude non-text strings (URLs, file names) from `search-strings` and `get-stats` | On a large site thousands of "untranslated" rows are image or asset URLs that need no action; an `exclude_urls` filter would make sweeps cleaner |
+| `sat_numbers_mismatch`: treat unit notations as equivalent (`m2` vs `m²`, `cm2` vs `cm²`) | Observed false positive in production: a source writing `27m2` and a translation writing `27 m²` raise the warning; harmless (warning only) but noisy |
 | Rate limiting | Single trusted caller for now; capabilities and per-call limits suffice |
 | Admin page (settings, change history, revert buttons) | Read-only constant and abilities cover v1 |
 | URL slug translation | Feature of a paid add-on |

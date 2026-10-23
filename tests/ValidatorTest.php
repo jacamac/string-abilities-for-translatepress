@@ -74,6 +74,27 @@ final class ValidatorTest extends TestCase {
 	}
 
 	/**
+	 * Gettext: sequential tokens turned positional are rejected, as TranslatePress would not display them.
+	 */
+	public function testGettextPositionalTokensForSequentialAreRejected(): void {
+		$this->assertSame( array( 'sat_placeholder_mismatch' ), $this->codes( Validator::check( '%s of %s', '%1$s sur %2$s', array(), true )['errors'] ) );
+	}
+
+	/**
+	 * Gettext: a changed conversion type is rejected even though the count is equal.
+	 */
+	public function testGettextChangedTokenTypeIsRejected(): void {
+		$this->assertSame( array( 'sat_placeholder_mismatch' ), $this->codes( Validator::check( '%s items', '%d articles', array(), true )['errors'] ) );
+	}
+
+	/**
+	 * Regular strings: a literal percent sign followed by text is not a placeholder.
+	 */
+	public function testRegularLiteralPercentPasses(): void {
+		$this->assertSame( array(), $this->errors( '50% de réduction', '50% off' ) );
+	}
+
+	/**
 	 * Invalid UTF-8 is rejected.
 	 */
 	public function testInvalidUtf8IsRejected(): void {

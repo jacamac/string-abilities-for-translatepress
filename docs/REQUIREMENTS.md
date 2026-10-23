@@ -188,9 +188,24 @@ Strings that plugins and themes pass through WordPress translation functions (`_
 
 Scope may shrink after the discovery (e.g. leave plurals read-only) — any reduction is recorded here before coding.
 
+**Discovery: done (2026-10-23)**, SCHEMA §14. No reduction: a status-2 row overrides the `.mo` (§14.2) and plural rows are safe to write when validated against `original_plural` (§14.4). Owner decisions on SCHEMA §14.9 (2026-10-23):
+
+| | Decision |
+|---|---|
+| G1 | Status `4` is exposed as a fourth status, `language_file`, for gettext (filter in `search-strings`, count in `get-stats`). |
+| G2 | On a `language_file` row: `translate` allowed, no `overwrite_reviewed` needed; `approve` → outcome `unchanged`, not written; `reset` → rejected with `sat_invalid_input`, the message saying TranslatePress would refill it from the plugin's `.mo` file. |
+| G3 | `reset` on a `human` gettext row: allowed with `overwrite_reviewed`; the description says the `.mo` text (or machine translation, or the original) returns on the next view. |
+| G4 | `source: gettext`: `sat_placeholder_mismatch` mirrors TranslatePress exactly (same token regex, sorted token lists equal, `class-process-gettext.php:1052-1089`), against `original_plural` for `plural_form > 0`. Regular strings keep the count rule. Tests: `%s %s` → `%1$s %2$s` and `%s` → `%d` rejected for gettext; `50% de réduction` → `50% off` passes for regular. |
+| G5 | Default language rejected for gettext too (`sat_invalid_language`). |
+| G6 | Gettext rows with `original_id` `NULL`/`0` are excluded. |
+| G7 | The schema guard also requires index `gettext_original_plural_unique`; without it only gettext writes return `sat_schema_unsupported`. Gettext reads need only their columns. |
+| G8 | Gettext table access lives in `src/Gettext.php`; the schema guard stays in `Strings`. |
+
+Gettext outputs also carry `original_plural` (null for non-plural strings): it is the text a `plural_form > 0` row translates. `get-strings` with `source: gettext` returns one item per `original_id` + `plural_form` that has a row in a requested language (plural form 0 when none has).
+
 ## 6. Data
 
-One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `user_id`, `language`, `original_id`, `row_id` (dictionary row written; revert targets it with the same conditional `UPDATE`, never a row found by value), `action` (`translate`|`approve`|`reset`|`revert`), `old_value`, `old_status`, `new_value`, `new_status`, `note`, `reverted_by` (nullable). `dbDelta` on activation; option `sat_db_version`.
+One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `user_id`, `language`, `source` (`regular`|`gettext`, Stage 2b), `plural_form` (nullable, gettext only), `original_id`, `row_id` (dictionary or gettext row written; revert targets it with the same conditional `UPDATE`, never a row found by value), `action` (`translate`|`approve`|`reset`|`revert`), `old_value`, `old_status`, `new_value`, `new_status`, `note`, `reverted_by` (nullable). `dbDelta` on activation; option `sat_db_version`.
 
 `uninstall.php` drops the table and plugin options and removes the `translation_agent` role and the plugin's capabilities. Never touches TranslatePress tables.
 
@@ -221,6 +236,7 @@ src/Writes.php        write abilities and get-change-log, with the §5.2 item ru
 src/Strings.php       access to TranslatePress tables, schema guard, settings read, conditional update
 src/Validator.php     pure PHP, no WordPress calls: errors + warnings + normalize()
 src/ChangeLog.php     change table, batches, revert
+src/Gettext.php       access to TranslatePress gettext tables (Stage 2b, decision G8)
 tests/ValidatorTest.php
 ```
 
@@ -233,7 +249,7 @@ If a file passes ~300 lines, reconsider before splitting. Ability callbacks are 
 ## 9. Testing — the whole budget
 
 **Automated (PHPUnit on plain PHP, seconds, no WordPress):** `ValidatorTest`, ~15 cases:
-identical markup passes · added `<script>` · added `onclick` · changed `href` · dropped tag · renamed attribute · placeholder count · invalid UTF-8 · over-length · invented number · dropped number · identical to original · protected term missing · protected term present · plain text passes · bare `&` encoded (owner, Stage 2); plus `normalize()`: entity vs literal · typographic vs straight apostrophe · non-breaking vs plain space · accents preserved.
+identical markup passes · added `<script>` · added `onclick` · changed `href` · dropped tag · renamed attribute · placeholder count · invalid UTF-8 · over-length · invented number · dropped number · identical to original · protected term missing · protected term present · plain text passes · bare `&` encoded (owner, Stage 2); plus `normalize()`: entity vs literal · typographic vs straight apostrophe · non-breaking vs plain space · accents preserved; plus Stage 2b (G4): gettext reordered positional tokens rejected · gettext `%s` → `%d` rejected · regular literal `%` followed by text passes.
 
 Add a pure-function test for write rules (conflict, overwrite_reviewed, approve on untranslated) **only** if Stage 0 shows they can be isolated without WordPress. Never build WordPress mocks.
 
