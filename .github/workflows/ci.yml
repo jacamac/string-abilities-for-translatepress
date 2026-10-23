@@ -37,3 +37,47 @@ jobs:
         env:
           SAT_PRIVATE_TERMS: ${{ secrets.SAT_PRIVATE_TERMS }}
         run: bin/check-private-terms.sh
+
+  version:
+    name: Version consistency
+    runs-on: ubuntu-24.04  # pinned; move to a newer image deliberately
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Header Version = SAT_VERSION = Stable tag
+        run: bin/check-version.sh
+
+  php:
+    name: PHPCS, PHPStan, PHPUnit
+    runs-on: ubuntu-24.04  # pinned; move to a newer image deliberately
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          tools: composer, cs2pr
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: PHPCS (WordPress Coding Standards)
+        run: ./vendor/bin/phpcs --report=checkstyle -q | cs2pr
+
+      - name: PHPStan (level 6, WordPress stubs)
+        run: ./vendor/bin/phpstan analyse --memory-limit=512M --no-progress
+
+      - name: PHPUnit
+        run: ./vendor/bin/phpunit
