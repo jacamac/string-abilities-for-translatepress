@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-23
+
 ### Added
 - Specification (`docs/REQUIREMENTS.md`), README with the planned ability reference, and project instructions.
 - Stage 0 discovery (`docs/SCHEMA.md`) and TranslatePress internals notes (`docs/TRANSLATEPRESS-INTERNALS.md`).
