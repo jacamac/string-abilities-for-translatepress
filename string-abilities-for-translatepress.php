@@ -24,6 +24,7 @@ define( 'SAT_VERSION', '0.3.0' );
 
 require_once __DIR__ . '/src/Validator.php';
 require_once __DIR__ . '/src/Strings.php';
+require_once __DIR__ . '/src/Gettext.php';
 require_once __DIR__ . '/src/ChangeLog.php';
 require_once __DIR__ . '/src/Plugin.php';
 require_once __DIR__ . '/src/Writes.php';
