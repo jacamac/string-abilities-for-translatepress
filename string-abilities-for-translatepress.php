@@ -3,7 +3,7 @@
  * Plugin Name:       String Abilities for TranslatePress
  * Plugin URI:        https://github.com/jacamac/string-abilities-for-translatepress
  * Description:       WordPress abilities for reading, reviewing and correcting TranslatePress string translations.
- * Version:           0.2.0
+ * Version:           0.3.0
  * Requires at least: 6.9
  * Requires PHP:      8.1
  * Requires Plugins:  translatepress-multilingual
@@ -20,7 +20,7 @@ declare(strict_types=1);
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'SAT_VERSION', '0.2.0' );
+define( 'SAT_VERSION', '0.3.0' );
 
 require_once __DIR__ . '/src/Validator.php';
 require_once __DIR__ . '/src/Strings.php';
