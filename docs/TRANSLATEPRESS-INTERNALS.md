@@ -194,6 +194,26 @@ Read in `Q:94-170` (`get_existing_translations()`) and `R:2062`, `R:2096-2113` (
 
 Any other row for that `original_id` is reported with `sat_duplicate_rows`. Known gap [inferred]: render does not filter `block_type`, so a `block_type = 2` row with byte-identical text could be the rendered one. Decision C excludes those rows, and a deprecated block's HTML original rarely equals a plain string.
 
+## 10b. String Translation counts vs `get-stats`
+
+Read at Stage 2 in `get_originals_results()` (`H` = `TP/includes/string-translation/class-string-translation-helper.php`), called for regular strings from `TP/includes/string-translation/class-string-translation-api-regular.php:26-32` with filters `status` and `block_type`. All [code] unless marked.
+
+- **The count is `SELECT COUNT(*)`, not `COUNT(DISTINCT …)`** (`H:240`, run at `H:350`, `H:366`). The listed page uses `SELECT DISTINCT original_strings.id` (`H:241`), so the count can exceed what the list shows.
+- **"All statuses" is no status filter.** Ticking every status box empties the status list (`H:59-62`). Without a status or block-type filter and without a search, no dictionary table is joined at all (`H:245-254`). The count is then every row of `trp_original_strings` (`H:243`), **the same number for every language**. It includes:
+  - originals with no row in that language (seen only in other languages, or before the language was added). No status filter can match them: `LEFT JOIN … WHERE lang.status = N` drops rows with no match;
+  - originals whose only rows in that language have `block_type 2`, `original_id` mismatches, or stale links;
+  - duplicate originals (no UNIQUE key, `Q:579-581`).
+- **Per-status counts include duplicate rows.** The status filter joins `{dict} AS lang ON lang.original_id = original_strings.id` (`H:144-146`) and adds `lang.status = N` (`H:113-142`). `COUNT(*)` then counts one per **matching dictionary row**: an original with two rows of the same status counts twice, and one with rows of different statuses counts once in each filter.
+- **No `block_type` filter** unless the separate translation-block filter is set (`H:216-222`, `H:252-254`), so `block_type 2` rows are counted.
+- **Status 3 (similar) is in no filter.** The regular filters are `human_reviewed` (2), `machine_translated` (1) and `not_translated` (0) (`TP/includes/string-translation/class-string-translation.php:173-184`, mapped through `get_constant_*` at `H:53-57`; the gettext-only filter is removed at `H:49-51`). `get-stats` counts status 3 as `machine` (decision B).
+- **Viewing String Translation inserts rows.** For originals on the listed page that have no row in a language, it calls `process_strings()` (`class-string-translation-api-regular.php:44-56`), which inserts them and may machine-translate them (§10 item 1). Counts can therefore change just by browsing it.
+
+**Why TranslatePress is higher than `get-stats` per status:** `get-stats` counts one row per `original_id` (the rendered one, §10a) and only `block_type IN (0, 1)`. TranslatePress counts every duplicate row and `block_type 2` rows. Two effects go the other way, so the gap is the net: TranslatePress leaves out status 3, and its join leaves out rows whose `original_id` is `NULL`, `0` or not in `trp_original_strings`, which `get-stats` counts [inferred from `Strings::stats()`, whose first query has no `original_id` condition].
+
+**Why "all statuses" exceeds the sum of the three filters:** mainly originals with no row in that language, plus originals with only `block_type 2` rows, minus the duplicates and status-3 rows above.
+
+[inferred] To confirm on a site, per language: `SELECT COUNT(*) FROM {originals}` (TranslatePress "all"), `SELECT status, COUNT(*) FROM {originals} o JOIN {dict} d ON d.original_id = o.id GROUP BY status` (TranslatePress per status), against `get-stats`.
+
 ## 11. What is likely to break on a TranslatePress update
 
 All items here are [inferred] from how the code is shaped. Re-check them on every TranslatePress version bump.
