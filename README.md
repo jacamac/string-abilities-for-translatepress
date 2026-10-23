@@ -41,7 +41,11 @@ Tested with TranslatePress 3.3.x. On an untested TranslatePress database schema,
 
 ## Abilities
 
-All abilities are in the `string-abilities/` namespace. A string is identified by its TranslatePress **`original_id`** plus a **language code** (e.g. `en_GB`). Statuses are `untranslated`, `machine` and `human`.
+All abilities are in the `string-abilities/` namespace. A string is identified by its TranslatePress **`original_id`** plus a **language code** (e.g. `en_GB`). Statuses are `untranslated`, `machine` (machine-translated, including TranslatePress "similar" translations) and `human`.
+
+**Text matching is normalised, not exact.** TranslatePress stores source text as it appears in the page HTML, with entities and typographic punctuation. Lookups therefore ignore entity encoding, typographic vs straight apostrophes and quotes, non-breaking spaces and repeated whitespace. Case and accents still count.
+
+Read abilities only run plain database reads: they never trigger machine translation or create rows.
 
 Only regular (page) strings are covered in v1. Plugin/theme gettext strings and URL slugs are not.
 
@@ -61,7 +65,7 @@ Paged search within one language.
 |---|---|---|
 | `language` | string | required |
 | `status` | array of status | optional |
-| `query` | string | optional; substring of the original or the translation |
+| `query` | string | optional; substring of the original or the translation (normalised) |
 | `page`, `per_page` | integer | `per_page` ≤ 50 |
 
 Returns `original_id`, `original`, `translated`, `status` for each match.
@@ -72,13 +76,13 @@ Fetch specific strings in all (or some) languages at once.
 | Input | Type | |
 |---|---|---|
 | `original_ids` | array of integer | ≤ 20; use this **or** `originals` |
-| `originals` | array of string | exact source-language text, ≤ 20 |
+| `originals` | array of string | source-language text, ≤ 20, matched as described above |
 | `languages` | array of string | optional |
 
-Returns, per original, its translation and status in each language, plus `not_found` for texts that matched nothing.
+Returns, per original, the stored source text and its translation and status in each language, plus `not_found` for texts that matched nothing. A warning `sat_duplicate_rows` flags strings for which TranslatePress holds more than one row in a language; the plugin always works on the row TranslatePress displays.
 
 #### `get-auto-translation-settings`
-Whether automatic translation is on, which engine, and for which languages. API keys and license data are never returned.
+Whether automatic translation is on (`enabled`), whether it is limited to the TranslatePress editor (`manual_only`), which engine, and for which languages. API keys, license data and notification email are never returned.
 
 ### Write
 
@@ -97,7 +101,7 @@ Each item:
 | Field | |
 |---|---|
 | `original_id`, `language` | which translation |
-| `action` | `translate` (needs `translated`), `approve` (machine → human, text unchanged) or `reset` (→ untranslated) |
+| `action` | `translate` (needs `translated`), `approve` (machine → human, text unchanged) or `reset` (→ untranslated; with automatic translation on and `manual_only` off, TranslatePress machine-translates it again on the next page view) |
 | `translated` | new text, for `translate` |
 | `expected_current` | **required**: the translation as you last read it (empty if untranslated). If it no longer matches, the item is a `conflict` and nothing is written |
 | `overwrite_reviewed` | must be `true` to change or reset a translation whose status is `human` |
@@ -111,6 +115,7 @@ Each item comes back with an `outcome` (`would_apply`, `applied`, `unchanged`, `
 | `sat_html_mismatch` | tags or attributes differ from the original, or a link/source/handler value changed |
 | `sat_placeholder_mismatch` | `%s`, `%d`, `%1$s`… count differs from the original |
 | `sat_reviewed_protected` | target is human-reviewed and `overwrite_reviewed` is not set |
+| `sat_sanitization_changed` | TranslatePress's own sanitising would alter the text (for example `%` followed by two hex characters); nothing is stored that differs from what was validated |
 | `sat_too_long`, `sat_invalid_utf8` | input limits |
 
 **Warnings** (reported, never block):
@@ -120,6 +125,7 @@ Each item comes back with an `outcome` (`would_apply`, `applied`, `unchanged`, `
 | `sat_numbers_mismatch` | a number appears in the translation but not the original, or the reverse — catches invented dates and dropped prices |
 | `sat_identical_to_original` | translation equals the source text |
 | `sat_protected_term_missing` | a `protected_terms` entry present in the original is missing or altered |
+| `sat_duplicate_rows` | TranslatePress holds several rows for this string in this language; only the displayed one is changed |
 
 #### `revert`
 Undo one change (`change_id`) or a whole batch (`batch_id`). Restores the previous text **and** status. Each restored item that was modified again since is reported as a `conflict` and left alone. Reverts are logged too.
@@ -142,14 +148,15 @@ Paged change history, filterable by `language`, `batch_id` and `since`.
 2. Review each language; build `items` with `approve` for good machine output and `translate` for corrections, passing `expected_current` as read.
 3. Call `update-translations` with `dry_run: true` (the default). Show the diff and warnings to the human.
 4. After approval, repeat the same call with `dry_run: false`.
-5. If something looks wrong on the site: `revert` with the `batch_id`.
+5. Check the page in each language. If your site uses a page cache, purge it first: TranslatePress translates at render time, so a cached page still shows the old text.
+6. If something looks wrong: `revert` with the `batch_id`.
 
 ## Security model
 
 - Two capabilities: `sat_read` (read abilities) and `sat_manage` (write abilities). The `administrator` role gets both on activation.
 - A dedicated role, **`translation_agent`**, has only `read`, `sat_read` and `sat_manage`. For direct API use, create a user with this role and authenticate with an Application Password (WordPress core, *Users → Profile → Application Passwords*).
 - **Read-only mode:** add `define( 'SAT_READ_ONLY', true );` to `wp-config.php` to disable all write abilities.
-- The plugin never writes source-language (original) strings, never deletes rows, and never touches TranslatePress settings.
+- The plugin never writes source-language (original) strings, never inserts or deletes TranslatePress rows, and never touches TranslatePress settings. Each write is a single conditional update that fails if the translation changed since it was read.
 - Text returned by the abilities is site content and must be treated as untrusted data by any agent consuming it.
 
 **Limitation:** when abilities are called through an MCP bridge or a hosting connector, they run as whatever WordPress user that bridge authenticates as — often an administrator. The plugin's own checks (capabilities, validation, read-only mode, protection of human translations) still apply, but identity-level least privilege then depends on the bridge.

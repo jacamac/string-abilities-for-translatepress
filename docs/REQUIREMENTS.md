@@ -3,7 +3,7 @@
 WordPress plugin that registers a small set of **WordPress Abilities** for reading, reviewing and correcting TranslatePress string translations. It ships **no MCP server and no REST routes**: abilities are exposed by whatever already exposes the site's abilities (core `/wp-json/wp-abilities/v1/`, a hosting provider's MCP connector, the MCP Adapter plugin).
 
 > Audience: Claude Code. Owner: Jacques Leisy (GitHub `jacamac`). GPL-2.0-or-later, to be published.
-> Spec revision 4 (2026-10-23).
+> Spec revision 5 (2026-10-23) — Stage 0 findings and decisions A–G applied.
 > Legend: **[VERIFY]** believed true, confirm in TranslatePress / WordPress source before relying on it.
 
 ---
@@ -65,20 +65,39 @@ Download TranslatePress **3.3.8** from wordpress.org; read WordPress core 6.9+ f
 
 **Gate:** owner reviews `docs/SCHEMA.md` before Stage 1.
 
+**Status: done (2026-10-23).** Findings in `docs/SCHEMA.md`; wider notes in `docs/TRANSLATEPRESS-INTERNALS.md` (read it before touching TP internals). Owner decisions on the open questions:
+
+| | Decision |
+|---|---|
+| A | Several dictionary rows per `original_id` + language: read and write **the row TranslatePress renders** (Stage 1 confirms which one from `class-query.php:118-138` and records it in INTERNALS). Report the extra rows with warning `sat_duplicate_rows`. Never delete them. |
+| B | Status `3` (similar translated) is reported and counted as `machine`; `approve` turns it into `human`. |
+| C | `block_type IN (0, 1)` only; never change `block_type`. |
+| D | Do not fire `trp_save_editor_translations_regular_strings`. |
+| E | No `context` in v1. |
+| F | `get-auto-translation-settings` also returns `manual_only` (the free `manual_translation_only` advanced setting). |
+| G | Text lookups use **normalised comparison** (see §5.4), because originals are stored as emitted in the page HTML (entities, typographic quotes). Stage 1 verifies on the dev site how a typed apostrophe is stored. |
+
 ---
 
 ## 5. Scope v1 — seven abilities
 
-Regular (dictionary) strings only. All abilities: `input_schema` with `additionalProperties: false`, `output_schema`, accurate `annotations`, `show_in_rest: true`, `meta.mcp.public: true`. Items are identified by **`original_id` + `language`** throughout.
+Regular (dictionary) strings only, `block_type IN (0, 1)`. Items are identified by **`original_id` + `language`** throughout. Statuses exposed: `untranslated` (0), `machine` (1 and 3), `human` (2).
+
+All abilities (SCHEMA §12):
+- registered on `wp_abilities_api_categories_init` / `wp_abilities_api_init`;
+- object `input_schema` with `additionalProperties: false` (top-level `default` for no-argument abilities), `output_schema`;
+- `meta`: `show_in_rest: true`, `mcp: { public: true }`, `annotations` — reads `readonly: true` (GET); writes `readonly: false, destructive: true, idempotent: false` (POST);
+- **callbacks apply property defaults and cast types themselves** (core fills no nested defaults; 6.9 GET input arrives as strings). In particular `dry_run` defaults to `true` **in code**;
+- reads use **direct `SELECT`s only** — never `process_strings()`, the editor or String Translation APIs, which insert rows and spend machine-translation quota (SCHEMA §9).
 
 ### 5.1 Read — Stage 1
 
 | Ability | Input | Output |
 |---|---|---|
 | `get-stats` | `language?` | Per language: counts untranslated / machine / human |
-| `search-strings` | `language` (required), `status?` (array), `query?` (substring on original or translation), `page`, `per_page` (≤ 50) | Items `original_id`, `original`, `translated`, `status`; paging |
-| `get-strings` | exactly one of `original_ids[]` or `originals[]` (exact text, ≤ 20 each); `languages?` | Per original: `original_id`, `original`, `translations` `{ lang: { translated, status } }`, `context?` (only if §4.8 allows, free TP only); plus `not_found[]` |
-| `get-auto-translation-settings` | — | `enabled`, `engine`, `languages` (as available per §4.10). **Never** API keys or license data |
+| `search-strings` | `language` (required), `status?` (array), `query?` (substring on original or translation, normalised per §5.4), `page`, `per_page` (≤ 50) | Items `original_id`, `original`, `translated`, `status`; paging |
+| `get-strings` | exactly one of `original_ids[]` or `originals[]` (text, ≤ 20 each, matched per §5.4); `languages?` | Per original: `original_id`, `original` (as stored), `translations` `{ lang: { translated, status } }`, `warnings[]` (e.g. `sat_duplicate_rows`); plus `not_found[]` |
+| `get-auto-translation-settings` | — | `enabled`, `manual_only`, `engine`, `languages` (translation languages minus default, intersected with the engine's cached supported list when present). Read with `get_option` and an explicit key allowlist; no TP method calls (they can make HTTP calls). **Never** API keys, license data or notification email |
 
 ### 5.2 Write — Stage 2
 
@@ -86,7 +105,7 @@ Regular (dictionary) strings only. All abilities: `input_schema` with `additiona
 
 Input:
 - `items[]` (≤ 100), each `{ original_id, language, action, translated?, expected_current, overwrite_reviewed? }`
-  - `action`: `translate` (requires `translated`), `approve` (machine → human, text unchanged), `reset` (→ untranslated)
+  - `action`: `translate` (requires `translated`), `approve` (machine → human, text unchanged), `reset` (→ untranslated: writes `status = 0` and `translated = ''`; with automatic translation on and `manual_only` off, the string is machine-translated again on its next page view)
   - `expected_current`: the translation the caller last read (empty string if untranslated). **Required.**
 - `protected_terms[]?` — strings that, when present in the original, must appear verbatim in the translation
 - `note?` (≤ 200 chars)
@@ -99,6 +118,14 @@ Rules:
 - `approve` on an untranslated row → error; on a human row → outcome `unchanged`.
 - Originals are never written.
 - Errors block the item; warnings never block.
+
+Write mechanics (SCHEMA §5, §11):
+- Target row per decision A. Write with one conditional statement that can never insert:
+  `UPDATE {dict} SET translated = %s, status = %d WHERE id = %d AND original_id = %d AND BINARY COALESCE(translated,'') = %s AND status = %d` — 0 rows affected → `conflict`. This makes `expected_current` atomic. `NULL` compares as `''`.
+- Never write `original` or `block_type`. Never insert or delete rows.
+- Final text = `Validator` → `wp_kses` (allowlist from the original's tags) → `trp_sanitize_string()`. If that pipeline changes the text, the item is rejected with `sat_sanitization_changed` (e.g. `%xx` sequences, which TranslatePress strips) rather than storing something different from what was validated.
+- Table names only via `TRP_Query::get_table_name()` for codes in `trp_settings['translation-languages']` minus the default.
+- No cache invalidation (TP's only cache group is request-scoped). Full-page caches are outside the plugin; README says so in one line.
 
 Output: `dry_run`, `batch_id` (only when written), `items[]` with `original_id`, `language`, `outcome` (`would_apply` | `applied` | `unchanged` | `rejected` | `conflict`), `errors[]`, `warnings[]`, `old` `{ translated, status }`, `new` `{ translated, status }`.
 
@@ -118,6 +145,18 @@ Warnings (never block):
 - `sat_identical_to_original` — translation equals the original (likely missed translation).
 - `sat_protected_term_missing` — a `protected_terms` entry present in the original is absent or altered in the translation (case-sensitive).
 
+Raised outside `Validator`: `sat_sanitization_changed` (error), `sat_duplicate_rows` (warning).
+
+### 5.4 Text normalisation (pure PHP, unit-tested)
+
+Originals are stored exactly as emitted in the page HTML: text nodes keep entities (`&amp;`, `&#8217;`), attributes are decoded (SCHEMA §4). Text a person or agent types will therefore rarely match byte for byte.
+
+`normalize(string): string` — decode HTML entities, map typographic apostrophes/quotes/dashes and non-breaking spaces to their plain equivalents, collapse internal whitespace, trim. Case and accents are kept.
+
+- `get-strings` `originals[]`: find candidates in `trp_original_strings` with a `LIKE` on the longest word of the input (≥ 4 characters, entity-free, cap 200 candidates), then keep those whose `normalize(original)` equals `normalize(input)`. Several matches → return them all.
+- `search-strings` `query`: same candidate approach on the dictionary, filtered in PHP with normalised `str_contains` on original and translation.
+- The ability descriptions state that matching is normalised, not exact.
+
 ---
 
 ## 6. Data
@@ -131,7 +170,7 @@ One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `u
 ## 7. Security
 
 1. Capabilities `sat_read`, `sat_manage`. Activation creates role `translation_agent` (`read`, `sat_read`, `sat_manage`) and grants both caps to `administrator`. Each `permission_callback` checks its cap. Never `manage_options`.
-2. Read-only switch: constant `SAT_READ_ONLY` or option `sat_read_only` → write abilities return `sat_writes_disabled`.
+2. Read-only switch: constant `SAT_READ_ONLY` or option `sat_read_only` → write abilities return `sat_writes_disabled`. This and `sat_schema_unsupported` are returned from the **execute** callback: a `WP_Error` from a permission callback is replaced by a generic error (SCHEMA §12). Permission callbacks only check capabilities.
 3. HTML and placeholder validation per §5.3 (stored-XSS protection: translations render publicly).
 4. Limits per §5. SQL only via `$wpdb->prepare`; table names built only from the validated list of configured languages.
 5. Schema guard: on first use per TranslatePress version, check expected columns (cached). Mismatch → writes return `sat_schema_unsupported`; reads still work if their columns exist.
@@ -149,8 +188,8 @@ Not in v1 (→ LATER.md): rate limiting, admin UI, approval queue, dry-run token
 string-abilities-for-translatepress.php   header, constants, bootstrap, activation/deactivation
 uninstall.php
 src/Plugin.php        registers category, abilities, capabilities/role
-src/Strings.php       access to TranslatePress tables, schema guard, cache invalidation, settings read
-src/Validator.php     pure PHP, no WordPress calls: errors + warnings
+src/Strings.php       access to TranslatePress tables, schema guard, settings read
+src/Validator.php     pure PHP, no WordPress calls: errors + warnings + normalize()
 src/ChangeLog.php     change table, batches, revert
 tests/ValidatorTest.php
 ```
@@ -162,7 +201,7 @@ If a file passes ~300 lines, reconsider before splitting. Ability callbacks are 
 ## 9. Testing — the whole budget
 
 **Automated (PHPUnit on plain PHP, seconds, no WordPress):** `ValidatorTest`, ~15 cases:
-identical markup passes · added `<script>` · added `onclick` · changed `href` · dropped tag · renamed attribute · placeholder count · invalid UTF-8 · over-length · invented number · dropped number · identical to original · protected term missing · protected term present · plain text passes.
+identical markup passes · added `<script>` · added `onclick` · changed `href` · dropped tag · renamed attribute · placeholder count · invalid UTF-8 · over-length · invented number · dropped number · identical to original · protected term missing · protected term present · plain text passes; plus `normalize()`: entity vs literal · typographic vs straight apostrophe · non-breaking vs plain space · accents preserved.
 
 Add a pure-function test for write rules (conflict, overwrite_reviewed, approve on untranslated) **only** if Stage 0 shows they can be isolated without WordPress. Never build WordPress mocks.
 
@@ -176,7 +215,7 @@ Add a pure-function test for write rules (conflict, overwrite_reviewed, approve 
 
 A leak found after a push is handled by rotating the credential first, then rewriting history; deleting the file is not enough.
 
-**Manual smoke test** (`docs/SMOKE-TEST.md`, ≤ 15 steps, ≤ 15 min), run on the dev site through the hosting connector's `execute_ability`: abilities listed · stats · search · get-strings by text and by id · auto-translation settings (no secrets) · dry run with a warning · apply translate · front end shows it · TranslatePress editor shows human status · approve · overwrite human without flag rejected · stale `expected_current` → conflict · revert batch · read-only switch.
+**Manual smoke test** (`docs/SMOKE-TEST.md`, ≤ 15 steps, ≤ 15 min), run on the dev site through the hosting connector's `execute_ability`: abilities listed · stats · search · get-strings by id, by exact text and by text typed with a straight apostrophe · auto-translation settings (no secrets) · dry run with a warning · apply translate · front end shows it (purge or bypass any page cache first) · TranslatePress editor shows human status · approve · overwrite human without flag rejected · stale `expected_current` → conflict · revert batch · read-only switch.
 
 ---
 
