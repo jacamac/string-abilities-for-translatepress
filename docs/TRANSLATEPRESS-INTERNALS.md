@@ -174,6 +174,25 @@ Verified **not** to exist: `trp_translate_string` and `trp_get_translation` (SCH
 15. **Abilities API, GET input on 6.9.** It arrives uncoerced, so numbers and booleans are strings (`WP/rest-api/endpoints/class-wp-rest-abilities-v1-run-controller.php:193-203`). 7.1 coerces (7.1 `:241-331`).
 16. **Abilities API, destructive + idempotent → HTTP DELETE.** Query-string input is not JSON-decoded, so TP deliberately avoids this combination (`WP/rest-api/endpoints/class-wp-rest-abilities-v1-run-controller.php:110-133`, `TP/includes/class-abilities.php:259-265`).
 17. **Abilities API, callbacks without an input schema get no argument at all** (`WP/abilities-api/class-wp-ability.php:505-512`).
+18. **Engine language codes need an HTTP-capable lookup.** Matching a language against `trp_db_stored_data['trp_mt_supported_languages'][engine]['languages']` goes through each engine's `get_engine_specific_language_codes()` (e.g. `TP/includes/mtapi/class-mtapi-machine-translator.php:221-231`, filter `trp_mtapi_source_language`). That calls `TRP_Languages::get_iso_codes()` (`TP/includes/class-languages.php:177`, filter `trp_map_wp_codes_to_google`), which calls `get_wp_languages()` → `wp_get_available_translations()` (`:154-165`) [code]. [inferred] On a cold `available_translations` site transient this is an HTTP call to wordpress.org. This is why `get-auto-translation-settings` returns the languages unfiltered (owner decision, Stage 1).
+
+## 10a. Which duplicate row TranslatePress renders (decision A)
+
+Read in `Q:94-170` (`get_existing_translations()`) and `R:2062`, `R:2096-2113` (`process_strings()`) at Stage 1. All [code] unless marked.
+
+- The render query is `SELECT original, translated, status … WHERE status != 0 AND original IN (…)` with **no `ORDER BY`** and, from the front end, **no `block_type` filter** (`Q:105`; callers at `R:1115`, `R:2062` pass no `$block_type`).
+- Results are keyed by the PHP string `$row->original` (`Q:123`). The page looks up `$dictionary[ $string ]` with the exact page text (`R:2111-2112`). [inferred] So only rows with byte-identical `original` compete. Case variants are returned by the collation but land under different keys.
+- Among competing rows, **the first row returned wins**. It is replaced only when it has an `empty()` translation and a later row has a non-empty one (`Q:125-139`). `empty()` is PHP's, so `''`, `NULL` and `'0'` all count as empty.
+- If the chosen row's translation is empty, nothing is shown and the string is not re-machine-translated (`R:2096-2104`).
+- Rows with `status = 0` are never rendered. When every row is untranslated, machine translation fills the row returned first by `get_untranslated_strings()` (`Q:1127-1144`), because `OBJECT_K` keeps the first row per key (`WP/class-wpdb.php:3165-3176`).
+- [inferred] With no `ORDER BY`, "first" is MySQL's choice. For an InnoDB lookup through `index_name (original(100))` it is normally ascending `id`, but this is not guaranteed.
+
+**Rule the plugin applies** for one `original_id` in one language (rows with `block_type IN (0, 1)`, ordered by `id` ascending):
+1. the first row with `status != 0` and a non-empty translation (PHP `empty()` semantics);
+2. otherwise the first row with `status != 0`;
+3. otherwise the first row (all untranslated).
+
+Any other row for that `original_id` is reported with `sat_duplicate_rows`. Known gap [inferred]: render does not filter `block_type`, so a `block_type = 2` row with byte-identical text could be the rendered one. Decision C excludes those rows, and a deprecated block's HTML original rarely equals a plain string.
 
 ## 11. What is likely to break on a TranslatePress update
 
