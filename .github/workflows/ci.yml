@@ -1,0 +1,39 @@
+name: CI
+
+# Runs on every push and PR: the leak checks must see every commit.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  leaks:
+    name: Leak checks (gitleaks + private terms)
+    runs-on: ubuntu-24.04  # pinned; move to a newer image deliberately
+
+    steps:
+      - name: Checkout code (full history)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The binary is used directly (no marketplace action) and pinned by checksum.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+
+      - name: Scan full git history for secrets
+        run: /tmp/gitleaks git --redact --verbose --exit-code 1 .
+
+      - name: Check tracked files for private terms
+        env:
+          SAT_PRIVATE_TERMS: ${{ secrets.SAT_PRIVATE_TERMS }}
+        run: bin/check-private-terms.sh
