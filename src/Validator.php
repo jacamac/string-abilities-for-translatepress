@@ -119,6 +119,26 @@ final class Validator {
 	}
 
 	/**
+	 * The wp_kses allowlist of an original: its tags with their attributes.
+	 *
+	 * @param string $original Original as stored by TranslatePress.
+	 * @return array<string, array<string, bool>> Attribute names by tag name.
+	 */
+	public static function allowed_html( string $original ): array {
+		preg_match_all( self::TAG, $original, $tags, PREG_SET_ORDER );
+		$allowed = array();
+		foreach ( $tags as $tag ) {
+			$name             = strtolower( $tag[2] );
+			$allowed[ $name ] = $allowed[ $name ] ?? array();
+			preg_match_all( self::ATTRIBUTE, $tag[3], $attributes, PREG_SET_ORDER );
+			foreach ( $attributes as $attribute ) {
+				$allowed[ $name ][ strtolower( $attribute[1] ) ] = true;
+			}
+		}
+		return $allowed;
+	}
+
+	/**
 	 * Normalise text for comparison: decode HTML entities, map typographic
 	 * apostrophes, quotes, dashes, the ellipsis and non-breaking spaces to plain ones,
 	 * collapse whitespace and trim. Case and accents are kept.

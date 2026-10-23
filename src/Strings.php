@@ -1,6 +1,6 @@
 <?php
 /**
- * Read access to TranslatePress tables and settings.
+ * Access to TranslatePress tables and settings.
  *
  * @package StringAbilities
  */
@@ -12,9 +12,9 @@ namespace StringAbilities;
 use WP_Error;
 
 /**
- * Plain SELECTs on TranslatePress tables. Never calls TranslatePress's
- * render, editor or String Translation code, which insert rows and spend
- * machine-translation quota (SCHEMA §9).
+ * Plain SELECTs and one conditional UPDATE on TranslatePress tables. Never
+ * calls TranslatePress's render, editor or String Translation code, which
+ * insert rows and spend machine-translation quota (SCHEMA §9).
  *
  * Only regular strings with block_type 0 or 1 are read (decision C). When a
  * language holds several rows for one original_id, the row TranslatePress
@@ -303,6 +303,79 @@ final class Strings {
 			$translations[ $original_id ] = self::translation( self::rendered_row( $group ) ) + array( 'rows' => count( $group ) );
 		}
 		return $translations;
+	}
+
+	/**
+	 * The row a write targets for one original in one language: the row
+	 * TranslatePress renders (decision A).
+	 *
+	 * @param string $language    Validated language code.
+	 * @param int    $original_id Original id.
+	 * @return array{id: int, original: string, translated: string, status: int, rows: int}|null Null when the language has no row for it.
+	 */
+	public function target_row( string $language, int $original_id ): ?array {
+		$group = $this->rows_by_original( $language, array( $original_id ) )[ $original_id ] ?? null;
+		if ( null === $group ) {
+			return null;
+		}
+		$row = self::rendered_row( $group );
+		return array(
+			'id'         => (int) $row['id'],
+			'original'   => (string) $row['original'],
+			'translated' => (string) ( $row['translated'] ?? '' ),
+			'status'     => (int) $row['status'],
+			'rows'       => count( $group ),
+		);
+	}
+
+	/**
+	 * First row of an original in one language that still holds a given
+	 * translation and status (used by revert).
+	 *
+	 * @param string $language    Validated language code.
+	 * @param int    $original_id Original id.
+	 * @param string $translated  Translation the row must hold (NULL counts as '').
+	 * @param int    $status      Status the row must hold.
+	 * @return int|null Row id, or null if no row matches.
+	 */
+	public function row_holding( string $language, int $original_id, string $translated, int $status ): ?int {
+		foreach ( $this->rows_by_original( $language, array( $original_id ) )[ $original_id ] ?? array() as $row ) {
+			if ( (string) ( $row['translated'] ?? '' ) === $translated && (int) $row['status'] === $status ) {
+				return (int) $row['id'];
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Change the translation and status of one dictionary row, only if it still
+	 * holds the expected translation and status (SCHEMA §5). One UPDATE that
+	 * can never insert; original and block_type are never written.
+	 *
+	 * @param string $language       Validated language code.
+	 * @param int    $id             Dictionary row id.
+	 * @param int    $original_id    Original id the row must belong to.
+	 * @param string $old_translated Expected current translation (NULL counts as '').
+	 * @param int    $old_status     Expected current status.
+	 * @param string $new_translated New translation.
+	 * @param int    $new_status     New status.
+	 * @return bool True if the row was changed; false on conflict.
+	 */
+	public function update_row( string $language, int $id, int $original_id, string $old_translated, int $old_status, string $new_translated, int $new_status ): bool {
+		global $wpdb;
+		$changed = $wpdb->query(
+			$wpdb->prepare(
+				"UPDATE %i SET translated = %s, status = %d WHERE id = %d AND original_id = %d AND BINARY COALESCE(translated, '') = %s AND status = %d",
+				$this->dictionary_table( $language ),
+				$new_translated,
+				$new_status,
+				$id,
+				$original_id,
+				$old_translated,
+				$old_status
+			)
+		);
+		return 1 === $changed;
 	}
 
 	/**

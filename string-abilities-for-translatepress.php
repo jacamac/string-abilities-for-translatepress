@@ -24,7 +24,9 @@ define( 'SAT_VERSION', '0.2.0' );
 
 require_once __DIR__ . '/src/Validator.php';
 require_once __DIR__ . '/src/Strings.php';
+require_once __DIR__ . '/src/ChangeLog.php';
 require_once __DIR__ . '/src/Plugin.php';
+require_once __DIR__ . '/src/Writes.php';
 
 /*
  * Plugin Update Checker: update notifications in the WordPress admin when a

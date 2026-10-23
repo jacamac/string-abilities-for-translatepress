@@ -214,12 +214,15 @@ Not in v1 (→ LATER.md): rate limiting, admin UI, approval queue, dry-run token
 ```
 string-abilities-for-translatepress.php   header, constants, bootstrap, activation/deactivation
 uninstall.php
-src/Plugin.php        registers category, abilities, capabilities/role
-src/Strings.php       access to TranslatePress tables, schema guard, settings read
+src/Plugin.php        registers category, read abilities, capabilities/role; shared registration helpers
+src/Writes.php        write abilities and get-change-log, with the §5.2 item rules
+src/Strings.php       access to TranslatePress tables, schema guard, settings read, conditional update
 src/Validator.php     pure PHP, no WordPress calls: errors + warnings + normalize()
 src/ChangeLog.php     change table, batches, revert
 tests/ValidatorTest.php
 ```
+
+Stage 2 split (owner asked for a decision): the write abilities went into `src/Writes.php` because their per-item rules are a separate flow from the thin read callbacks and would have pushed `Plugin.php` to about 1 000 lines; `Strings.php` stays whole because it remains the single place that touches TranslatePress tables.
 
 If a file passes ~300 lines, reconsider before splitting. Ability callbacks are thin: validate input → call `Strings` / `ChangeLog` → shape output.
 
