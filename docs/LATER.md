@@ -4,7 +4,6 @@ Ideas deliberately left out of v1. Each one is built only when a real need shows
 
 | Idea | Why not now |
 |---|---|
-| Gettext (plugin/theme) strings | Different storage and keying; v1 covers page strings only |
 | Glossary per language (`get-glossary` / `set-glossary`) with "expected term" warnings | Inflection and case changes (e.g. German) produce many false positives; `protected_terms` covers the safe part. Check whether the machine-translation engine's own glossary feature can be used instead |
 | Length warnings for `<title>` / meta description | Free TranslatePress does not translate SEO meta tags (paid SEO Pack); no reliable string context |
 | String context in outputs (post IDs, title / meta / content, URL) | Free TranslatePress only records partial, add-only post IDs (SCHEMA §8) |

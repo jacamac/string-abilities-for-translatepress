@@ -11,3 +11,4 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 - Specification and README updated with Stage 0 decisions: normalised text matching, conditional atomic writes, reset semantics, `manual_only` setting, duplicate-row and sanitisation codes, no `context` in v1.
+- Plan extended with Stage 2b (0.3.0): plugin and theme (gettext) strings through a `source` parameter on the existing abilities.

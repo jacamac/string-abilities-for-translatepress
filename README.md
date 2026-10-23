@@ -47,7 +47,7 @@ All abilities are in the `string-abilities/` namespace. A string is identified b
 
 Read abilities only run plain database reads: they never trigger machine translation or create rows.
 
-Only regular (page) strings are covered in v1. Plugin/theme gettext strings and URL slugs are not.
+Version 0.1–0.2 covers regular (page) strings. **Plugin and theme strings** (text plugins pass through WordPress translation functions, stored by TranslatePress in its gettext tables) are planned for 0.3.0 through an optional `source` parameter on the same abilities. URL slugs are not covered.
 
 ### Read
 

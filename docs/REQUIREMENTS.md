@@ -3,7 +3,7 @@
 WordPress plugin that registers a small set of **WordPress Abilities** for reading, reviewing and correcting TranslatePress string translations. It ships **no MCP server and no REST routes**: abilities are exposed by whatever already exposes the site's abilities (core `/wp-json/wp-abilities/v1/`, a hosting provider's MCP connector, the MCP Adapter plugin).
 
 > Audience: Claude Code. Owner: GitHub `jacamac`. GPL-2.0-or-later, to be published.
-> Spec revision 5 (2026-10-23) — Stage 0 findings and decisions A–G applied.
+> Spec revision 6 (2026-10-23) — adds Stage 2b: plugin and theme (gettext) strings.
 > Legend: **[VERIFY]** believed true, confirm in TranslatePress / WordPress source before relying on it.
 
 ---
@@ -90,6 +90,8 @@ All abilities (SCHEMA §12):
 - **callbacks apply property defaults and cast types themselves** (core fills no nested defaults; 6.9 GET input arrives as strings). In particular `dry_run` defaults to `true` **in code**;
 - reads use **direct `SELECT`s only** — never `process_strings()`, the editor or String Translation APIs, which insert rows and spend machine-translation quota (SCHEMA §9).
 
+Stages 1 and 2 cover regular (page) strings. Stage 2b extends the same abilities to gettext strings (§5.5); design Stage 1 and 2 code so that adding a `source` parameter later needs no rewrite, but do **not** implement anything for gettext before Stage 2b.
+
 ### 5.1 Read — Stage 1
 
 | Ability | Input | Output |
@@ -158,6 +160,29 @@ Originals are stored exactly as emitted in the page HTML: text nodes keep entiti
 - The ability descriptions state that matching is normalised, not exact.
 
 ---
+
+### 5.5 Plugin and theme strings (gettext) — Stage 2b
+
+Strings that plugins and themes pass through WordPress translation functions (`__()`, `_e()`, `_x()`, `_n()`…) are stored by TranslatePress in separate gettext tables (SCHEMA §13). Third-party and the owner's own plugins are treated identically.
+
+**Stage 2b discovery first** (add findings to `docs/SCHEMA.md` §14 and INTERNALS), with file/line references:
+1. Exact gettext table and column names in TP 3.3.8; how a row is addressed (`original_id`, `plural_form`, `domain`, `context`).
+2. How rendering picks a translation: TP table vs the plugin's own `.mo` file (status `4`). Does writing status `2` in the TP table override a `.mo` translation?
+3. Statuses used in gettext tables, and whether rows are inserted at render time (quota / side effects for reads).
+4. Plural forms: how many rows per original per language, and how the plural count is determined.
+5. How the gettext editor saves (sanitisation, hooks, duplicates), to mirror §5.2 write mechanics.
+6. Placeholder conventions in gettext strings (`%s`, `%1$s`, `%d`) — `Validator` placeholder parity becomes critical here: a broken placeholder can trigger a PHP error in the plugin.
+
+**Scope (no new abilities):**
+- Add optional `source`: `regular` (default) | `gettext` to `get-stats`, `search-strings`, `get-strings`, `update-translations` (per item), `get-change-log`.
+- Gettext items are identified by `original_id` + `plural_form` (default 0) + `language`; outputs add `domain`, `context`, `plural_form`.
+- Add optional `domain` filter to `get-stats` and `search-strings` (e.g. list everything from one plugin).
+- `get-strings` by text with `source: gettext` matches on `original` and optional `domain` / `context`.
+- Same rules as §5.2–5.4 (dry run default, `expected_current`, `overwrite_reviewed`, Validator, sanitisation, change log, revert).
+- Change log gains `source`, `plural_form` (nullable for regular).
+- Schema guard covers the gettext columns; on mismatch only gettext writes are disabled.
+
+Scope may shrink after the discovery (e.g. leave plurals read-only) — any reduction is recorded here before coding.
 
 ## 6. Data
 
@@ -240,5 +265,6 @@ First read `github.com/jacamac/beds24-availability-calendar` (published as *Avai
 | 0 Discovery | — | `docs/SCHEMA.md` | Owner approves |
 | 1 Read-only | 0.1.0 | Tooling, CI, release workflow, bootstrap, caps/role, schema guard, 4 read abilities | Read part of smoke test passes on dev; installed on production, stats consistent with the TranslatePress editor |
 | 2 Write | 0.2.0 | Validator + tests, change log, `update-translations`, `revert`, `get-change-log`, read-only switch | Full smoke test on dev; on production after a backup: one small multi-language batch verified on front end and in the editor, reverted, re-applied |
+| 2b Plugin strings | 0.3.0 | Short discovery (§5.5) → `source: gettext` on existing abilities, `domain` filter, change-log columns, Validator reused | Smoke test with one plugin string per action on dev, including a placeholder string; on production: one batch on one plugin's strings, verified on the front end, reverted, re-applied |
 | 3 Public | 1.0.0 | Review pass, final README / readme.txt / SECURITY.md, repo public | Owner sign-off; then contact Cozmoslabs |
 | Later | — | See `docs/LATER.md` | Only on demonstrated need |
