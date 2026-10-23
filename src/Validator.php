@@ -34,6 +34,7 @@ final class Validator {
 		"\u{2013}" => '-', // En dash.
 		"\u{2014}" => '-', // Em dash.
 		"\u{2212}" => '-', // Minus sign.
+		"\u{2026}" => '...', // Horizontal ellipsis.
 		"\u{00A0}" => ' ', // No-break space.
 		"\u{2007}" => ' ', // Figure space.
 		"\u{2009}" => ' ', // Thin space.
@@ -42,7 +43,7 @@ final class Validator {
 
 	/**
 	 * Normalise text for comparison: decode HTML entities, map typographic
-	 * apostrophes, quotes, dashes and non-breaking spaces to plain ones,
+	 * apostrophes, quotes, dashes, the ellipsis and non-breaking spaces to plain ones,
 	 * collapse whitespace and trim. Case and accents are kept.
 	 *
 	 * @param string $text Text as stored by TranslatePress or typed by a caller.

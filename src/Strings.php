@@ -34,11 +34,12 @@ final class Strings {
 
 	/**
 	 * Search filter: three status flags (untranslated, human, machine), then the
-	 * normalised query and its LIKE pattern for original and translation.
+	 * normalised lower-case query and its LIKE pattern for original and translation,
+	 * compared lower-cased whatever the column collation.
 	 */
 	private const SEARCH_WHERE = 'block_type IN (0, 1) AND original_id > 0'
 		. ' AND ((%d AND status = 0) OR (%d AND status = 2) OR (%d AND status NOT IN (0, 2)))'
-		. " AND (%s = '' OR original LIKE %s OR translated LIKE %s)";
+		. " AND (%s = '' OR LOWER(original) LIKE %s OR LOWER(translated) LIKE %s)";
 
 	private const DICTIONARY_COLUMNS = array( 'id', 'original', 'translated', 'status', 'block_type', 'original_id' );
 	private const ORIGINALS_COLUMNS  = array( 'id', 'original' );
@@ -169,7 +170,7 @@ final class Strings {
 	 *
 	 * @param string   $language Validated language code.
 	 * @param string[] $statuses Status labels to keep; empty keeps all.
-	 * @param string   $query    Text to find in the original or translation (normalised); empty for none.
+	 * @param string   $query    Text to find in the original or translation (normalised, case-insensitive); empty for none.
 	 * @param int      $page     Page number, from 1.
 	 * @param int      $per_page Items per page.
 	 * @return array{items: list<array<string, mixed>>, total: int, truncated: bool}
@@ -183,7 +184,7 @@ final class Strings {
 			(int) ( $all || in_array( 'human', $statuses, true ) ),
 			(int) ( $all || in_array( 'machine', $statuses, true ) ),
 		);
-		$needle = Validator::normalize( $query );
+		$needle = mb_strtolower( Validator::normalize( $query ) );
 		$like   = '%' . $wpdb->esc_like( self::longest_word( $needle ) ) . '%';
 		$args   = array_merge( array( $table ), $flags, array( $needle, $like, $like ) );
 
@@ -211,7 +212,7 @@ final class Strings {
 			if ( ! $all && ! in_array( $item['status'], $statuses, true ) ) {
 				continue;
 			}
-			if ( '' !== $needle && ! str_contains( Validator::normalize( (string) $row['original'] ), $needle ) && ! str_contains( Validator::normalize( $item['translated'] ), $needle ) ) {
+			if ( '' !== $needle && ! str_contains( mb_strtolower( Validator::normalize( (string) $row['original'] ) ), $needle ) && ! str_contains( mb_strtolower( Validator::normalize( $item['translated'] ) ), $needle ) ) {
 				continue;
 			}
 			$items[] = array(

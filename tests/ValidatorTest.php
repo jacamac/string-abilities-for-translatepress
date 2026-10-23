@@ -39,6 +39,14 @@ final class ValidatorTest extends TestCase {
 	}
 
 	/**
+	 * A typographic ellipsis, as an entity or a character, matches three dots.
+	 */
+	public function testNormalizeEllipsisMatchesThreeDots(): void {
+		$this->assertSame( 'Wait...', Validator::normalize( 'Wait&hellip;' ) );
+		$this->assertSame( 'Wait...', Validator::normalize( "Wait\u{2026}" ) );
+	}
+
+	/**
 	 * Non-breaking spaces, repeated whitespace and surrounding blanks collapse to single spaces.
 	 */
 	public function testNormalizeNonBreakingSpaceMatchesPlainSpace(): void {

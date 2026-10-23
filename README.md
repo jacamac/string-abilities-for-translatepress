@@ -43,7 +43,7 @@ Tested with TranslatePress 3.3.x. If TranslatePress's tables lack an expected co
 
 All abilities are in the `string-abilities/` namespace. A string is identified by its TranslatePress **`original_id`** plus a **language code** (e.g. `en_GB`). Statuses are `untranslated`, `machine` (machine-translated, including TranslatePress "similar" translations) and `human`.
 
-**Text matching is normalised, not exact.** TranslatePress stores source text as it appears in the page HTML, with entities and typographic punctuation. Lookups therefore ignore entity encoding, typographic vs straight apostrophes, quotes and dashes, non-breaking spaces and repeated whitespace. Case and accents still count. Returned `original` text is always as stored (e.g. `Don&#8217;t`).
+**Text matching is normalised, not exact.** TranslatePress stores source text as it appears in the page HTML, with entities and typographic punctuation. Lookups therefore ignore entity encoding, typographic vs straight apostrophes, quotes and dashes, an ellipsis vs three dots, non-breaking spaces and repeated whitespace. Accents still count; case counts too, except in `search-strings`, which ignores it. Returned `original` text is always as stored (e.g. `Don&#8217;t`).
 
 Read abilities only run plain database reads: they never trigger machine translation or create rows. When TranslatePress holds several rows for one string in a language, the abilities use the row TranslatePress displays.
 
@@ -67,7 +67,7 @@ Paged search within one language.
 |---|---|---|
 | `language` | string | required |
 | `status` | array of status | optional |
-| `query` | string | optional; substring of the original or the translation (normalised) |
+| `query` | string | optional; substring of the original or the translation (normalised, case-insensitive) |
 | `page`, `per_page` | integer | default 1 and 20; `per_page` ≤ 50 |
 
 Returns `items` (`original_id`, `original`, `translated`, `status`), `page`, `per_page` and `total`. With a `query`, at most 200 candidate strings are examined; `truncated` is `true` when there were more, so refine the query.
