@@ -127,6 +127,8 @@ Write mechanics (SCHEMA §5, §11):
 - Never write `original` or `block_type`. Never insert or delete rows.
 - Final text = `Validator` → `wp_kses` (allowlist from the original's tags) → `trp_sanitize_string()`. If that pipeline changes the text, the item is rejected with `sat_sanitization_changed` (e.g. `%xx` sequences, which TranslatePress strips) rather than storing something different from what was validated.
 - Table names only via `TRP_Query::get_table_name()` for codes in `trp_settings['translation-languages']` minus the default.
+- **No row, no write:** an original with no dictionary row yet in the target language cannot be written (the plugin never inserts). The item is rejected with `sat_not_found` and a message saying TranslatePress creates the row when the page is viewed in that language. `get-strings` shows such a language as absent from `translations`.
+- Stage 2 first confirms in `class-string-translation-helper.php` why TranslatePress's String Translation "all statuses" count exceeds the sum of its three status filters (observed on the dev site: about 40 more), and records it in INTERNALS. Expected: originals with no row in that language, plus excluded `block_type 2` rows.
 - No cache invalidation (TP's only cache group is request-scoped). Full-page caches are outside the plugin; README says so in one line.
 
 Output: `dry_run`, `batch_id` (only when written), `items[]` with `original_id`, `language`, `outcome` (`would_apply` | `applied` | `unchanged` | `rejected` | `conflict`), `errors[]`, `warnings[]`, `old` `{ translated, status }`, `new` `{ translated, status }`.
