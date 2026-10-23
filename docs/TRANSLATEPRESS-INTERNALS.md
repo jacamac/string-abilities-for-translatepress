@@ -59,7 +59,7 @@ This file collects what was learned from reading the source, beyond the §4 answ
 - **Insert** [code]. New originals: `insert_strings()` (`Q:1022-1056`) → `original_strings_sync()` (`Q:711-758`) for ids → one multi-row `INSERT` with `status 0`. The whole insert is gated by the filter `trp_allow_string_saving` (`R:2268`). This means **every page view in a translation language can add rows** (the "pro-active scan" described in `TP/includes/advanced-settings/manual-translation-only.php:12`).
 - **Post context:** see SCHEMA §8 [code] (`R:2797-2819`, `R:1451-1458`, `Q:760-813`).
 
-## 4. Gettext strings (background, not v1)
+## 4. Gettext strings
 
 [code]
 - TP hooks the `gettext` family (`TP/includes/gettext/class-gettext-manager.php:169`).
@@ -68,6 +68,20 @@ This file collects what was learned from reading the source, beyond the §4 answ
 - Gettext machine translation runs separately (`class-gettext-manager.php:587`). It shares the request's time budget, with regular strings served first (comment at `R:2154-2158`).
 
 [inferred] The markers can leak into contexts TP doesn't render (emails, JSON, date formats). Several strip helpers exist for that reason (`class-gettext-manager.php:634-641`, `:730-760`).
+
+**Stage 2b reading** (decision record: SCHEMA §14). `P` = `TP/includes/gettext/class-process-gettext.php`, `M` = `TP/includes/gettext/class-gettext-manager.php`.
+
+- **Override order** [code]. WordPress resolves the `.mo` first; TP filters at priority 100 (`M:164-182`). The request map comes from `get_runtime_gettext_strings()`: only `translated <> ''` and `status IN (1, 2)` (`Q:1318-1340`). A map hit with text different from WordPress's and `is_sprintf_compatible()` replaces it (`P:196-208`). So status 2 overrides the `.mo`; status 4 is never loaded.
+- **Legacy load mode** [code]. Until the options `trp_updated_database_gettext_tables_optimization` and `…_runtime_status_update` say done, and always in editor preview, every row is loaded instead (`M:59-61`, `M:138-141`). [inferred] Status-4 rows then hold the `.mo` text, so nothing changes visibly.
+- **Status 4 is recent** [code]. Before the runtime-status migration, `.mo` text was stored as status 2. The migration compares each row with the current `.mo` and sets 2 or 4 (`TP/includes/class-upgrade.php:1334-1434`).
+- **Status-4 text is a snapshot** [inferred from `P:802-825`, `M:473-495`]. It is written once and not refreshed, so it can lag behind a plugin update.
+- **Reads create data** [code]. Front-end views insert missing rows and machine-translate at `shutdown` (`M:345-412`, `TP/class-translate-press.php:520`). Editor preview inserts synchronously (`P:591-625`). String Translation back-fills every plural form (`TP/includes/string-translation/class-string-translation-api-gettext.php:55-91`, `M:782-912`). `TRP_Plural_Forms` can `update_option( 'trp_db_stored_data' )` on construction (`TP/includes/gettext/class-plural-forms.php:67-98`).
+- **Plural index** [code]. `get_plural_form( $count, $locale )`; `null` count → 0 (`class-plural-forms.php:39-45`). The header comes from `trp_db_stored_data['gettext_plural_forms_header'][locale]`, fallback `nplurals=2` (`:67-98`, `:111-119`). Rows exist only for forms seen. For `plural_form > 0` the sprintf reference and the machine-translation source are `original_plural` (`P:202`, `M:565`).
+- **Placeholder guard** [code]. `is_sprintf_compatible()` compares the **sorted token lists** (`P:1052-1089`), filter `trp_check_sprintf_compatibility`. A mismatch is silently ignored at render (falls back to the `.mo` or the original).
+- **Context sentinel** [code]. An empty or `NULL` context is `trp_context` (`Q:1229-1231`); `lookup_hash = md5(original \x1F domain \x1F context)` (`Q:1242-1244`).
+- **Unique address** [code]. UNIQUE `(original_id, plural_form)` per gettext table (`TP/includes/queries/class-gettext-table-creation.php:56`); older sites get it from the optimisation migration (`TP/includes/class-upgrade.php:548-584`).
+- **Editor save** [code]. `trp_sanitize_string()`, status 2 if non-empty else 0, upsert, then `remove_possible_duplicates( …, 'gettext' )`, which ignores context (`TP/includes/class-editor-api-gettext-strings.php:81-125`, `Q:2078`). Nothing in free TP listens to `trp_save_editor_translations_gettext_strings`.
+- **Default language** [code]. It is always in `translation-languages` (`TP/includes/class-settings.php:236-237`), has a gettext table, and gets overrides applied (wrapping is skipped there, `P:274`).
 
 ## 5. How automatic translation is triggered
 
@@ -140,6 +154,9 @@ All [code]. Actions are marked "(action)"; the rest are filters.
 | `trp_translateable_information` (action) | `R:1141` | all strings and translations of a rendered page; the only per-render usage signal |
 | `trp_stop_translating_page`, `trp_before_translate_content`, `trp_pre_translating_html`, `trp_translated_html` | `R:559`, `R:571`, `R:675`, `R:1275` | whole-page hooks |
 | `trp_media_url_node_types` | `R:1012` | node types that are never inserted outside preview |
+| `trp_check_sprintf_compatibility` | `TP/includes/gettext/class-process-gettext.php:1054` | `false` disables the gettext placeholder guard |
+| `trp_skip_gettext_querying` / `trp_skip_gettext_processing` | `class-process-gettext.php:127`, `:483` | skip gettext lookups or wrapping |
+| `trp_processing_gettext_is_needed` | `TP/includes/gettext/class-gettext-manager.php:161` | whether gettext filters are added at all |
 
 Verified **not** to exist: `trp_translate_string` and `trp_get_translation` (SCHEMA §6).
 
@@ -177,6 +194,8 @@ Verified **not** to exist: `trp_translate_string` and `trp_get_translation` (SCH
 18. **Engine language codes need an HTTP-capable lookup.** Matching a language against `trp_db_stored_data['trp_mt_supported_languages'][engine]['languages']` goes through each engine's `get_engine_specific_language_codes()` (e.g. `TP/includes/mtapi/class-mtapi-machine-translator.php:221-231`, filter `trp_mtapi_source_language`). That calls `TRP_Languages::get_iso_codes()` (`TP/includes/class-languages.php:177`, filter `trp_map_wp_codes_to_google`), which calls `get_wp_languages()` → `wp_get_available_translations()` (`:154-165`) [code]. [inferred] On a cold `available_translations` site transient this is an HTTP call to wordpress.org. This is why `get-auto-translation-settings` returns the languages unfiltered (owner decision, Stage 1).
 19. **Abilities API, empty objects over REST.** The run controller returns the execute result through `rest_ensure_response()` unchanged (`WP/rest-api/endpoints/class-wp-rest-abilities-v1-run-controller.php:93-98`), so an empty `stdClass` (e.g. `get-strings` `translations` with no row) is sent as `{}` [code]. The list controller even turns an empty `default` of an object schema into `{}` on purpose (`WP/rest-api/endpoints/class-wp-rest-abilities-v1-list-controller.php:208-215`, applied at `:233`) [code]. A hosting connector showed that same `default` as `[]` (Stage 2): it re-encodes JSON objects as arrays, so `[]` seen through it may be `{}` on the wire [inferred from that observation].
 20. **MySQL 8 and empty dates.** A `DATETIME` column compared with `''` (e.g. `created_at >= ''`) failed the whole query on the dev site, even inside `('' = '' OR …)`; `$wpdb` then returns `null` and the error is easy to miss [inferred from the dev-site symptom: `get-change-log` empty while `revert` read the same table]. Add a condition only when its filter is set.
+21. **Gettext writes that fail TP's placeholder check are stored but never shown** [code] (`class-process-gettext.php:203`, `:1052-1089`). Validate with the same rule before writing.
+22. **`trp_sanitize_string()` at gettext render** strips `%xx` hex pairs, so `%02d` or `%1d` tokens break at render [code] (`class-process-gettext.php:204`, `TP/includes/functions.php:213-221`).
 
 ## 10a. Which duplicate row TranslatePress renders (decision A)
 
