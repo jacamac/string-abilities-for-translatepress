@@ -41,8 +41,16 @@ final class Strings {
 		. ' AND ((%d AND status = 0) OR (%d AND status = 2) OR (%d AND status NOT IN (0, 2)))'
 		. " AND (%s = '' OR LOWER(original) LIKE %s OR LOWER(translated) LIKE %s)";
 
-	private const DICTIONARY_COLUMNS = array( 'id', 'original', 'translated', 'status', 'block_type', 'original_id' );
-	private const ORIGINALS_COLUMNS  = array( 'id', 'original' );
+	private const DICTIONARY_COLUMNS        = array( 'id', 'original', 'translated', 'status', 'block_type', 'original_id' );
+	private const ORIGINALS_COLUMNS         = array( 'id', 'original' );
+	private const GETTEXT_COLUMNS           = array( 'id', 'original_id', 'plural_form', 'translated', 'status', 'domain' );
+	private const GETTEXT_ORIGINALS_COLUMNS = array( 'id', 'original', 'domain', 'context', 'original_plural' );
+
+	/**
+	 * Unique (original_id, plural_form) index of a gettext table: one row per
+	 * address, so gettext writes need no duplicate handling (decision G7).
+	 */
+	private const GETTEXT_UNIQUE_INDEX = 'gettext_original_plural_unique';
 
 	/**
 	 * Translation languages configured in TranslatePress, without the default language.
@@ -67,38 +75,54 @@ final class Strings {
 
 	/**
 	 * Map a TranslatePress status value to the exposed label.
-	 * 1 (machine) and 3 (similar) are both "machine" (decision B).
+	 * 1 (machine) and 3 (similar) are both "machine" (decision B); 4 only
+	 * occurs in gettext tables (decision G1).
 	 *
 	 * @param int $status TranslatePress status value.
-	 * @return string untranslated, machine or human.
+	 * @return string untranslated, machine, human or language_file.
 	 */
 	public static function status_label( int $status ): string {
 		return match ( $status ) {
 			0       => 'untranslated',
 			2       => 'human',
+			4       => 'language_file',
 			default => 'machine',
 		};
 	}
 
 	/**
-	 * Schema guard (REQUIREMENTS §7.5): checks the expected columns once per
-	 * TranslatePress version and table set, and caches the result.
+	 * Schema guard (REQUIREMENTS §7.5): checks the expected columns of the
+	 * regular and gettext tables, and the gettext unique index, once per
+	 * TranslatePress version and table set, and caches the result. Gettext
+	 * reads need only the gettext columns; gettext writes also need the index
+	 * (decision G7).
 	 *
+	 * @param string $source regular or gettext.
+	 * @param bool   $write  Whether the caller writes.
 	 * @return WP_Error|null Error with code sat_schema_unsupported, or null if the schema is supported.
 	 */
-	public function schema_error(): ?WP_Error {
-		$tables = array( $this->originals_table() => self::ORIGINALS_COLUMNS );
+	public function schema_error( string $source = 'regular', bool $write = false ): ?WP_Error {
+		$gettext = new Gettext();
+		$tables  = array(
+			'regular' => array( $this->originals_table() => self::ORIGINALS_COLUMNS ),
+			'gettext' => array( $gettext->originals_table() => self::GETTEXT_ORIGINALS_COLUMNS ),
+		);
 		foreach ( $this->languages() as $language ) {
-			$tables[ $this->dictionary_table( $language ) ] = self::DICTIONARY_COLUMNS;
+			$tables['regular'][ $this->dictionary_table( $language ) ] = self::DICTIONARY_COLUMNS;
+			$tables['gettext'][ $gettext->table( $language ) ]         = self::GETTEXT_COLUMNS;
 		}
 		$version = defined( 'TRP_PLUGIN_VERSION' ) ? (string) TRP_PLUGIN_VERSION : '';
-		$key     = md5( $version . '|' . implode( ',', array_keys( $tables ) ) );
+		$key     = md5( $version . '|' . implode( ',', array_keys( $tables['regular'] + $tables['gettext'] ) ) );
 
 		$cached = get_option( self::SCHEMA_OPTION );
-		if ( is_array( $cached ) && ( $cached['key'] ?? '' ) === $key && is_array( $cached['missing'] ?? null ) ) {
+		if ( is_array( $cached ) && ( $cached['key'] ?? '' ) === $key && is_array( $cached['missing']['gettext_index'] ?? null ) ) {
 			$missing = $cached['missing'];
 		} else {
-			$missing = $this->missing_columns( $tables );
+			$missing = array(
+				'regular'       => $this->missing_columns( $tables['regular'] ),
+				'gettext'       => $this->missing_columns( $tables['gettext'] ),
+				'gettext_index' => $this->missing_index( array_slice( array_keys( $tables['gettext'] ), 1 ), self::GETTEXT_UNIQUE_INDEX ),
+			);
 			update_option(
 				self::SCHEMA_OPTION,
 				array(
@@ -109,6 +133,7 @@ final class Strings {
 			);
 		}
 
+		$missing = 'gettext' === $source ? array_merge( $missing['gettext'], $write ? $missing['gettext_index'] : array() ) : $missing['regular'];
 		if ( array() === $missing ) {
 			return null;
 		}
@@ -446,7 +471,7 @@ final class Strings {
 	 * @param string $text Normalised text.
 	 * @return string Longest word, or '' if there is none.
 	 */
-	private static function longest_word( string $text ): string {
+	public static function longest_word( string $text ): string {
 		$longest = '';
 		foreach ( (array) preg_split( '/[^\p{L}\p{N}]+/u', $text, -1, PREG_SPLIT_NO_EMPTY ) as $word ) {
 			if ( mb_strlen( $word ) > mb_strlen( $longest ) ) {
@@ -476,6 +501,32 @@ final class Strings {
 			$columns = array_map( 'strtolower', $columns );
 			foreach ( array_diff( $expected, $columns ) as $column ) {
 				$missing[] = $table . '.' . $column;
+			}
+		}
+		return $missing;
+	}
+
+	/**
+	 * Tables lacking an index.
+	 *
+	 * @param string[] $tables Table names.
+	 * @param string   $index  Index name.
+	 * @return list<string> Missing indexes as table.index.
+	 */
+	private function missing_index( array $tables, string $index ): array {
+		global $wpdb;
+		$missing = array();
+		foreach ( $tables as $table ) {
+			$found = (int) $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND INDEX_NAME = %s',
+					$wpdb->dbname,
+					$table,
+					$index
+				)
+			);
+			if ( 0 === $found ) {
+				$missing[] = $table . '.' . $index;
 			}
 		}
 		return $missing;

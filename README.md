@@ -41,13 +41,23 @@ Tested with TranslatePress 3.3.x. If TranslatePress's tables lack an expected co
 
 ## Abilities
 
-All abilities are in the `string-abilities/` namespace. A string is identified by its TranslatePress **`original_id`** plus a **language code** (e.g. `en_GB`). Statuses are `untranslated`, `machine` (machine-translated, including TranslatePress "similar" translations) and `human`.
+All abilities are in the `string-abilities/` namespace. A string is identified by its TranslatePress **`original_id`** plus a **language code** (e.g. `en_GB`). Statuses are `untranslated`, `machine` (machine-translated, including TranslatePress "similar" translations) and `human`, plus `language_file` for plugin and theme strings (below).
 
 **Text matching is normalised, not exact.** TranslatePress stores source text as it appears in the page HTML, with entities and typographic punctuation. Lookups therefore ignore entity encoding, typographic vs straight apostrophes, quotes and dashes, an ellipsis vs three dots, non-breaking spaces and repeated whitespace. Accents still count; case counts too, except in `search-strings`, which ignores it. Returned `original` text is always as stored (e.g. `Don&#8217;t`).
 
 Read abilities only run plain database reads: they never trigger machine translation or create rows. When TranslatePress holds several rows for one string in a language, the abilities use the row TranslatePress displays.
 
-Version 0.1–0.2 covers regular (page) strings. **Plugin and theme strings** (text plugins pass through WordPress translation functions, stored by TranslatePress in its gettext tables) are planned for 0.3.0 through an optional `source` parameter on the same abilities. URL slugs are not covered.
+URL slugs are not covered.
+
+### Plugin and theme strings (`source: gettext`)
+
+Text that plugins and themes pass through WordPress translation functions (`__()`, `_x()`, `_n()`…) is stored by TranslatePress in separate gettext tables. Set `source: "gettext"` (default `regular`) on `get-stats`, `search-strings`, `get-strings`, each `update-translations` item, or `get-change-log` to work on them. Third-party and your own plugins are treated alike.
+
+- A gettext string is identified by `original_id` (numbered separately from page strings) plus **`plural_form`** (default 0) plus the language. For `_n()` strings TranslatePress keeps one row per plural form actually displayed; `plural_form` above 0 translates `original_plural`.
+- Gettext items also return `plural_form`, `original_plural` (or `null`), `domain` (the plugin's or theme's text domain) and `context` (from `_x()`, or `null`).
+- A fourth status, **`language_file`**, means the text comes from the plugin's own translation file (`.mo`) and is displayed from that file. A `human` translation **overrides** the `.mo` text; `translate` on a `language_file` string needs no `overwrite_reviewed`. `approve` on it is `unchanged`, and `reset` on it is rejected (`sat_invalid_input`), since TranslatePress would refill it from the `.mo` file. Resetting a `human` gettext translation brings back the `.mo` text if one exists, otherwise machine translation (if on) or the original.
+- Placeholders are checked the way TranslatePress checks them before displaying a gettext translation: the same `%s`, `%d`, `%1$s`… tokens, in any order. TranslatePress silently ignores a stored translation that fails this check, so the plugin rejects it (`sat_placeholder_mismatch`).
+- The default language is excluded, as for page strings. Gettext rows without an `original_id` (left over from old TranslatePress versions) are ignored.
 
 ### Read
 
@@ -58,7 +68,10 @@ Counts per language of untranslated, machine and human strings (one per string, 
 |---|---|---|
 | `language` | string | optional; all translation languages if omitted |
 
-Returns `languages`: `{ "fr_FR": { "untranslated": 12, "machine": 340, "human": 85 }, … }`.
+| `source` | string | optional; `regular` (default) or `gettext` |
+| `domain` | string | optional, gettext only; one text domain |
+
+Returns `languages`: `{ "fr_FR": { "untranslated": 12, "machine": 340, "human": 85 }, … }`. With `source: gettext`, one count per string and plural form, plus `language_file`.
 
 #### `search-strings`
 Paged search within one language.
@@ -67,10 +80,12 @@ Paged search within one language.
 |---|---|---|
 | `language` | string | required |
 | `status` | array of status | optional |
-| `query` | string | optional; substring of the original or the translation (normalised, case-insensitive) |
+| `query` | string | optional; substring of the original or the translation (normalised, case-insensitive); with gettext also the plural original |
+| `source` | string | optional; `regular` (default) or `gettext` |
+| `domain` | string | optional, gettext only; one text domain |
 | `page`, `per_page` | integer | default 1 and 20; `per_page` ≤ 50 |
 
-Returns `items` (`original_id`, `original`, `translated`, `status`), `page`, `per_page` and `total`. With a `query`, at most 200 candidate strings are examined; `truncated` is `true` when there were more, so refine the query.
+Returns `items` (`original_id`, `original`, `translated`, `status`; gettext items add `plural_form`, `original_plural`, `domain`, `context`), `page`, `per_page` and `total`. With a `query`, at most 200 candidate strings are examined; `truncated` is `true` when there were more, so refine the query.
 
 #### `get-strings`
 Fetch specific strings in all (or some) languages at once.
@@ -80,6 +95,10 @@ Fetch specific strings in all (or some) languages at once.
 | `original_ids` | array of integer | ≤ 20; use this **or** `originals` |
 | `originals` | array of string | source-language text, ≤ 20, matched as described above |
 | `languages` | array of string | optional |
+| `source` | string | optional; `regular` (default) or `gettext` |
+| `domain`, `context` | string | optional, gettext with `originals` only: the text domain and `_x()` context the text must have |
+
+With `source: gettext`, there is one item per `original_id` and `plural_form` that has a row in a requested language (plural form 0 if none has), with `plural_form`, `original_plural`, `domain` and `context` added.
 
 Returns `items`: per original, `original_id`, the stored source text (`original`), `translations` as `{ "fr_FR": { "translated", "status" }, … }` and `warnings` (`code`, `language`, `message`); plus `not_found` for ids or texts that matched nothing. One text can match several strings. A language is missing from `translations` when TranslatePress has no row for that string in it yet; with no row in any language, `translations` is `{}` (some MCP connectors re-encode it as `[]`). A warning `sat_duplicate_rows` flags strings for which TranslatePress holds more than one row in a language; the plugin always works on the row TranslatePress displays.
 
@@ -103,12 +122,14 @@ Each item:
 | Field | |
 |---|---|
 | `original_id`, `language` | which translation; each pair at most once per call |
+| `source` | `regular` (default) or `gettext` |
+| `plural_form` | gettext only; plural form index, default 0 |
 | `action` | `translate` (needs `translated`), `approve` (machine → human, text unchanged) or `reset` (→ untranslated; with automatic translation on and `manual_only` off, TranslatePress machine-translates it again on the next page view) |
 | `translated` | new text, for `translate` |
 | `expected_current` | **required**: the translation as you last read it (empty if untranslated). If it no longer matches, the item is a `conflict` and nothing is written |
 | `overwrite_reviewed` | must be `true` to change or reset a translation whose status is `human` |
 
-Returns `dry_run`, `writes_disabled` (read-only mode is on; only dry runs are possible), `items` and, when something was written, `batch_id`. Each item has `original_id`, `language`, an `outcome` (`would_apply`, `applied`, `unchanged`, `rejected`, `conflict`), `errors` and `warnings` (`code`, `message`), and `old` and `new` (`translated`, `status`; `null` when unknown).
+Returns `dry_run`, `writes_disabled` (read-only mode is on; only dry runs are possible), `items` and, when something was written, `batch_id`. Each item has `original_id`, `language`, `source` (and `plural_form` for gettext), an `outcome` (`would_apply`, `applied`, `unchanged`, `rejected`, `conflict`), `errors` and `warnings` (`code`, `message`), and `old` and `new` (`translated`, `status`; `null` when unknown).
 
 - `translate` stores the text with status `human`. `approve` on a `human` string, or a change that leaves text and status as they are, is `unchanged`.
 - The plugin only updates existing rows. A string with **no row yet in a language** is rejected with `sat_not_found`: TranslatePress creates the row when a page showing the string is viewed in that language.
@@ -120,10 +141,10 @@ Returns `dry_run`, `writes_disabled` (read-only mode is on; only dry runs are po
 | Code | Meaning |
 |---|---|
 | `sat_html_mismatch` | tags or attributes differ from the original, or a link/source/handler value changed |
-| `sat_placeholder_mismatch` | `%s`, `%d`, `%1$s`… count differs from the original |
+| `sat_placeholder_mismatch` | `%s`, `%d`, `%1$s`… count differs from the original; for gettext, the tokens differ (any order allowed), checked against `original_plural` for plural forms above 0 |
 | `sat_reviewed_protected` | target is human-reviewed and `overwrite_reviewed` is not set |
 | `sat_not_found` | no row for this string in this language (see above) |
-| `sat_invalid_input` | `translate` without text, or `approve` on an untranslated string |
+| `sat_invalid_input` | `translate` without text, `approve` on an untranslated string, or `reset` on a `language_file` gettext string |
 | `sat_sanitization_changed` | TranslatePress's own sanitising would alter the text (for example `%` followed by two hex characters); nothing is stored that differs from what was validated |
 | `sat_too_long`, `sat_invalid_utf8` | input limits |
 
@@ -140,7 +161,7 @@ Returns `dry_run`, `writes_disabled` (read-only mode is on; only dry runs are po
 #### `revert`
 Undo one change (`change_id`) or a whole batch (`batch_id`); pass exactly one. Needs `sat_manage`. Restores the previous text **and** status on the exact row that was written (never located by text, since duplicate rows often share it). A change whose row was modified since, or that was logged before 0.2.0's `row_id`, is a `conflict` and left alone; one already reverted is `unchanged`. Each restoration is logged as a new change (action `revert`) in a new batch, so a revert can itself be reverted.
 
-Returns `items` (`change_id`, `original_id`, `language`, `outcome` `applied` / `unchanged` / `conflict`, `old`, `new`) and, when something was restored, the new `batch_id`. Unknown ids return `sat_not_found`.
+Returns `items` (`change_id`, `original_id`, `language`, `source` (and `plural_form` for gettext), `outcome` `applied` / `unchanged` / `conflict`, `old`, `new`) and, when something was restored, the new `batch_id`. Unknown ids return `sat_not_found`.
 
 #### `get-change-log`
 Paged history of the plugin's changes, newest first. Needs `sat_read`.
@@ -148,21 +169,22 @@ Paged history of the plugin's changes, newest first. Needs `sat_read`.
 | Input | Type | |
 |---|---|---|
 | `language` | string | optional |
+| `source` | string | optional; `regular` or `gettext`; all if omitted |
 | `batch_id` | string | optional |
 | `since` | string | optional; UTC date-time, e.g. `2026-01-31T00:00:00Z` |
 | `page`, `per_page` | integer | default 1 and 20; `per_page` ≤ 50 |
 
-Returns `entries` (`id`, `batch_id`, `created_at` in UTC, `user_id`, `language`, `original_id`, `row_id` (the TranslatePress dictionary row written), `action`, `old_value`, `old_status`, `new_value`, `new_status`, `note`, `reverted_by`: the id of the change that reverted it, or `null`), `page`, `per_page` and `total`.
+Returns `entries` (`id`, `batch_id`, `created_at` in UTC, `user_id`, `language`, `source`, `plural_form` (`null` for page strings), `original_id`, `row_id` (the TranslatePress dictionary or gettext row written), `action`, `old_value`, `old_status`, `new_value`, `new_status`, `note`, `reverted_by`: the id of the change that reverted it, or `null`), `page`, `per_page` and `total`.
 
 ### Common errors
 
 | Code | Meaning |
 |---|---|
 | `sat_invalid_language` | not a configured translation language, or the default language |
-| `sat_invalid_input` | input combination not allowed (e.g. both `original_ids` and `originals`, the same string and language twice in one `update-translations` call, an invalid `since`) |
+| `sat_invalid_input` | input combination not allowed (e.g. both `original_ids` and `originals`, `domain`/`context`/`plural_form` without `source: gettext`, `domain`/`context` with `original_ids`, the same string and language twice in one `update-translations` call, an invalid `since`) |
 | `sat_not_found` | `revert`: unknown `change_id` or `batch_id` |
 | `sat_writes_disabled` | read-only mode is on (`revert`, and `update-translations` unless it is a dry run) |
-| `sat_schema_unsupported` | TranslatePress database schema not recognised (a table lacks an expected column) |
+| `sat_schema_unsupported` | TranslatePress database schema not recognised (a table lacks an expected column; for gettext writes, also the unique `(original_id, plural_form)` index). A gettext mismatch only affects `source: gettext` |
 
 ## Recommended workflow for an agent
 

@@ -41,6 +41,13 @@ final class Validator {
 	private const PLACEHOLDER = '/%(?:\d+\$)?[-+0#]*\d*(?:\.\d+)?[bcdeEfFgGosuxX]/';
 
 	/**
+	 * TranslatePress's sprintf token for gettext strings, copied from
+	 * TRP_Process_Gettext::is_sprintf_compatible() (TranslatePress 3.3.8,
+	 * includes/gettext/class-process-gettext.php:1065).
+	 */
+	private const GETTEXT_PLACEHOLDER = "/%(?:\\d+\\\$)?[-+0 #]*(?:'.)?\\d*(?:\\.\\d+)?[bcdeEfFgGhHosuxX%]/";
+
+	/**
 	 * Typographic characters and their plain equivalents.
 	 */
 	private const PLAIN_EQUIVALENTS = array(
@@ -75,9 +82,10 @@ final class Validator {
 	 * @param string   $original        Original as stored by TranslatePress.
 	 * @param string   $translated      Proposed translation.
 	 * @param string[] $protected_terms Terms that must survive verbatim when present in the original.
+	 * @param bool     $gettext         Whether the string is a gettext string: placeholders then follow TranslatePress's gettext rule.
 	 * @return array{errors: list<array{code: string, message: string}>, warnings: list<array{code: string, message: string}>}
 	 */
-	public static function check( string $original, string $translated, array $protected_terms = array() ): array {
+	public static function check( string $original, string $translated, array $protected_terms = array(), bool $gettext = false ): array {
 		$errors   = array();
 		$warnings = array();
 
@@ -94,7 +102,9 @@ final class Validator {
 		if ( self::tags( $original ) !== self::tags( $translated ) ) {
 			$errors[] = self::issue( 'sat_html_mismatch', 'Tags or attributes differ from the original, or a link, source, style or event-handler value changed.' );
 		}
-		if ( self::placeholder_count( $original ) !== self::placeholder_count( $translated ) ) {
+		if ( $gettext && ! self::sprintf_compatible( $translated, $original ) ) {
+			$errors[] = self::issue( 'sat_placeholder_mismatch', 'The printf placeholders (%s, %d, %1$s…) differ from the original; they must be the same tokens, in any order. TranslatePress would not display this translation.' );
+		} elseif ( ! $gettext && self::placeholder_count( $original ) !== self::placeholder_count( $translated ) ) {
 			$errors[] = self::issue( 'sat_placeholder_mismatch', 'The number of printf placeholders (%s, %d, %1$s…) differs from the original.' );
 		}
 
@@ -214,6 +224,30 @@ final class Validator {
 	 */
 	private static function placeholder_count( string $text ): int {
 		return (int) preg_match_all( self::PLACEHOLDER, str_replace( '%%', '', $text ) );
+	}
+
+	/**
+	 * TranslatePress's gettext placeholder rule, mirrored exactly from
+	 * TRP_Process_Gettext::is_sprintf_compatible() (TranslatePress 3.3.8,
+	 * includes/gettext/class-process-gettext.php:1052-1089): the sorted token
+	 * lists, without %%, must be equal. TranslatePress silently ignores a
+	 * stored translation that fails it.
+	 *
+	 * @param string $translated Translation.
+	 * @param string $reference  Original, or the plural original for plural forms above 0.
+	 * @return bool
+	 */
+	private static function sprintf_compatible( string $translated, string $reference ): bool {
+		if ( ! str_contains( $reference, '%' ) && ! str_contains( $translated, '%' ) ) {
+			return true;
+		}
+		$tokens = static function ( string $text ): array {
+			preg_match_all( self::GETTEXT_PLACEHOLDER, $text, $matches );
+			$found = array_values( array_filter( $matches[0], static fn( string $token ): bool => '%%' !== $token ) );
+			sort( $found );
+			return $found;
+		};
+		return $tokens( $reference ) === $tokens( $translated );
 	}
 
 	/**

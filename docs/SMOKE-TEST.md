@@ -31,3 +31,16 @@ Writes are POST (`update-translations`, `revert`); `get-change-log` is GET. Purg
 10. **Change log.** `get-change-log` with step 3's `batch_id`: two entries, action `translate`, old and new values and statuses, `reverted_by: null`.
 11. **Revert a batch.** `revert` with step 3's `batch_id`: both `applied`, a new `batch_id`. `get-strings` and the front end show the original machine texts with status `machine`. `get-change-log` shows two `revert` entries; the step 3 entries now have `reverted_by`. The same `revert` again: both `unchanged`.
 12. **Read-only switch.** `wp option update sat_read_only 1` (or `define( 'SAT_READ_ONLY', true );`): `update-translations` with `dry_run: false` and `revert` return `sat_writes_disabled`; a dry run still works and returns `writes_disabled: true`; reads still work. Set it back to `0`.
+
+## Plugin strings (Stage 2b, 0.3.0)
+
+Same setup as Stage 2. With `search-strings` (`source: "gettext"`, `language: L1`) pick a plugin's text domain `D` that has no translation file for `L1` and appears on a public page, and in `D`: a string `P` containing a `%s` or `%d` placeholder (machine or untranslated), a string `M` with status `language_file` (from any domain that ships a `.mo`), and, if one exists, a plural string `N` (non-null `original_plural`) with a row for `plural_form` 1. Note each `translated` as `expected_current`.
+
+1. **Stats and filter.** `get-stats` with `source: "gettext"` returns four counts per language, including `language_file`; with `domain: D` the counts are smaller. `get-stats` with `domain` but no `source` returns `sat_invalid_input`. Plugins screen shows `0.3.0-dev.N`.
+2. **Read a string.** `get-strings` with `source: "gettext"`, `originals: [<P's original>]`, `domain: D`: one item with `domain`, `context`, `plural_form: 0`. For `N` by `original_ids`, items for each plural form with a row.
+3. **Placeholder parity (dry run).** `translate` `P` in `L1` with the placeholder changed (`%s` → `%d`, or `%s %s` → `%1$s %2$s`): `rejected`, `sat_placeholder_mismatch`. With the same tokens reordered or kept: `would_apply`.
+4. **Apply and front end.** Same item with `dry_run: false`: `applied`, `batch_id`. Purge the page cache; the page showing `P` in `L1` shows the new text with the placeholder filled in, and no PHP warning in the log.
+5. **Override a `.mo` translation.** `approve` `M` (dry run): `unchanged`. `reset` `M`: `rejected`, `sat_invalid_input` with the `.mo` message. `translate` `M` with `dry_run: false` (no `overwrite_reviewed`): `applied`; the front end shows the new text instead of the `.mo` one.
+6. **Plural form.** If `N` exists: `translate` `N` `plural_form: 1` with a text matching `original_plural`'s placeholders (dry run): `would_apply`; `plural_form: 5`: `rejected`, `sat_not_found`.
+7. **Change log and revert.** `get-change-log` with `source: "gettext"` shows the step 4–5 entries with `source: gettext` and `plural_form: 0`. `revert` both batches: `applied`; the front end shows the original texts again (`M` from the `.mo`), and `get-strings` shows the old statuses.
+8. **Regular strings unaffected.** `get-stats` without `source` returns the same three counts as before the update; one Stage 2 dry run (`translate` `A`) still returns `would_apply` with `source: regular` in the item.

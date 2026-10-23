@@ -18,7 +18,7 @@ final class ChangeLog {
 	/**
 	 * Schema version of the table, stored in the sat_db_version option.
 	 */
-	public const DB_VERSION = '2';
+	public const DB_VERSION = '3';
 
 	/**
 	 * Option holding the installed schema version.
@@ -51,6 +51,8 @@ final class ChangeLog {
 			language varchar(20) NOT NULL,
 			original_id bigint(20) unsigned NOT NULL,
 			row_id bigint(20) unsigned NOT NULL DEFAULT 0,
+			source varchar(10) NOT NULL DEFAULT 'regular',
+			plural_form int(11) DEFAULT NULL,
 			action varchar(20) NOT NULL,
 			old_value longtext NOT NULL,
 			old_status int(11) NOT NULL,
@@ -81,7 +83,7 @@ final class ChangeLog {
 	 *
 	 * @param string               $batch_id Batch UUID.
 	 * @param string               $action   translate, approve, reset or revert.
-	 * @param array<string, mixed> $change   language, original_id, row_id (dictionary row written), old_value, old_status, new_value, new_status, note.
+	 * @param array<string, mixed> $change   language, source, plural_form (null for regular), original_id, row_id (row written), old_value, old_status, new_value, new_status, note.
 	 * @return int Change id.
 	 */
 	public static function record( string $batch_id, string $action, array $change ): int {
@@ -95,6 +97,8 @@ final class ChangeLog {
 				'language'    => (string) $change['language'],
 				'original_id' => (int) $change['original_id'],
 				'row_id'      => (int) $change['row_id'],
+				'source'      => (string) $change['source'],
+				'plural_form' => null === $change['plural_form'] ? null : (int) $change['plural_form'],
 				'action'      => $action,
 				'old_value'   => (string) $change['old_value'],
 				'old_status'  => (int) $change['old_status'],
@@ -102,7 +106,8 @@ final class ChangeLog {
 				'new_status'  => (int) $change['new_status'],
 				'note'        => (string) $change['note'],
 			),
-			array( '%s', '%s', '%d', '%s', '%d', '%d', '%s', '%s', '%d', '%s', '%d', '%s' )
+			// wpdb writes NULL for a null value whatever its format.
+			array( '%s', '%s', '%d', '%s', '%d', '%d', '%s', '%d', '%s', '%s', '%d', '%s', '%d', '%s' )
 		);
 		return (int) $wpdb->insert_id;
 	}
@@ -137,13 +142,14 @@ final class ChangeLog {
 	 * Paged entries, newest first.
 	 *
 	 * @param string $language Language code, or '' for all.
+	 * @param string $source   regular, gettext, or '' for all.
 	 * @param string $batch_id Batch id, or '' for all.
 	 * @param string $since    UTC 'Y-m-d H:i:s', or '' for all.
 	 * @param int    $page     Page number, from 1.
 	 * @param int    $per_page Entries per page.
 	 * @return array{entries: list<array<string, mixed>>, total: int}
 	 */
-	public static function entries( string $language, string $batch_id, string $since, int $page, int $per_page ): array {
+	public static function entries( string $language, string $source, string $batch_id, string $since, int $page, int $per_page ): array {
 		global $wpdb;
 		// Only the filters given: MySQL 8 rejects created_at >= '' outright,
 		// even inside an OR whose other side is true, and the query then fails.
@@ -151,6 +157,7 @@ final class ChangeLog {
 		$args  = array( self::table() );
 		foreach ( array(
 			'language = %s'    => $language,
+			'source = %s'      => $source,
 			'batch_id = %s'    => $batch_id,
 			'created_at >= %s' => $since,
 		) as $condition => $value ) {

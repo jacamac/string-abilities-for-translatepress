@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Plugin and theme strings (TranslatePress gettext tables): optional `source` (`regular` default, `gettext`) on `get-stats`, `search-strings`, `get-strings`, `update-translations` (per item, with `plural_form`) and `get-change-log`. Gettext items carry `plural_form`, `original_plural`, `domain` and `context`; `get-stats` and `search-strings` take a `domain` filter, `get-strings` with `originals` takes `domain` and `context`.
+- Status `language_file` (TranslatePress status 4: text from the plugin's own `.mo` file). `approve` leaves it `unchanged`; `reset` on it is rejected with `sat_invalid_input`.
+- Change log columns `source` and `plural_form` (`sat_db_version` 3); entries and `revert` items report them.
+- Schema guard covers the gettext tables and their unique `(original_id, plural_form)` index; a mismatch only disables gettext (the index only gettext writes).
+- `Validator::check()` gettext mode: `sat_placeholder_mismatch` uses TranslatePress's own rule (same tokens, any order), so a translation TranslatePress would silently ignore is rejected; with unit tests.
+
+### Changed
+- `update-translations` and `revert` items include `source` (and `plural_form` for gettext).
+
 ## [0.2.0] - 2026-10-23
 
 ### Added

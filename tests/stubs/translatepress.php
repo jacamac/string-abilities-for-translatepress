@@ -30,6 +30,15 @@ class TRP_Query {
 
 	/** @return string */
 	public function get_table_name_for_original_strings() {}
+
+	/**
+	 * @param string $language_code Language code.
+	 * @return string
+	 */
+	public function get_gettext_table_name( $language_code ) {}
+
+	/** @return string */
+	public function get_table_name_for_gettext_original_strings() {}
 }
 
 /**

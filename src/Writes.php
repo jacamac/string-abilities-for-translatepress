@@ -47,7 +47,7 @@ final class Writes {
 		Plugin::register(
 			'update-translations',
 			__( 'Update translations', 'string-abilities-for-translatepress' ),
-			'Translate, approve or reset strings, in several languages in one call. dry_run defaults to true: nothing is written until you repeat the call with dry_run false. Each item needs expected_current, the translation as you last read it (empty if untranslated); if it changed since, the item is a conflict and nothing is written. Changing or resetting a human translation needs overwrite_reviewed true. translate stores the text as human; approve turns a machine translation into human without changing it; reset makes the string untranslated, and with automatic translation on (and manual_only off) TranslatePress machine-translates it again on its next page view. Translations are checked against the original (HTML, printf placeholders, numbers, protected_terms) and must survive TranslatePress\'s sanitising unchanged; a bare & is stored as &amp; (warning sat_ampersand_encoded). In read-only mode only dry runs are allowed, and writes_disabled is true. A string with no row yet in a language cannot be written (sat_not_found): TranslatePress creates the row when a page showing it is viewed in that language. Full-page caches still show the old text until purged. ' . Plugin::UNTRUSTED,
+			'Translate, approve or reset strings, in several languages in one call. dry_run defaults to true: nothing is written until you repeat the call with dry_run false. Each item needs expected_current, the translation as you last read it (empty if untranslated); if it changed since, the item is a conflict and nothing is written. Changing or resetting a human translation needs overwrite_reviewed true. translate stores the text as human; approve turns a machine translation into human without changing it; reset makes the string untranslated, and with automatic translation on (and manual_only off) TranslatePress machine-translates it again on its next page view. Plugin and theme strings: set source gettext and plural_form (default 0) on the item. A human gettext translation overrides the plugin\'s own translation file (.mo); resetting it brings back the .mo text if there is one (else machine translation or the original). On a language_file row, approve is unchanged and reset is rejected (TranslatePress would refill it from the .mo). Translations are checked against the original (plural forms above 0 against the plural original; HTML, printf placeholders, which for gettext must be the same tokens in any order, as TranslatePress requires, numbers, protected_terms) and must survive TranslatePress\'s sanitising unchanged; a bare & is stored as &amp; (warning sat_ampersand_encoded). In read-only mode only dry runs are allowed, and writes_disabled is true. A string with no row yet in a language cannot be written (sat_not_found): TranslatePress creates the row when a page showing it is viewed in that language. Full-page caches still show the old text until purged. ' . Plugin::UNTRUSTED,
 			Plugin::input(
 				array(
 					'items'           => array(
@@ -62,6 +62,12 @@ final class Writes {
 									'minimum' => 1,
 								),
 								'language'           => Plugin::LANGUAGE,
+								'source'             => Plugin::SOURCE,
+								'plural_form'        => array(
+									'type'        => 'integer',
+									'minimum'     => 0,
+									'description' => 'Gettext only: plural form index, default 0.',
+								),
 								'action'             => array(
 									'type' => 'string',
 									'enum' => array( 'translate', 'approve', 'reset' ),
@@ -121,6 +127,7 @@ final class Writes {
 							array(
 								'original_id' => array( 'type' => 'integer' ),
 								'language'    => array( 'type' => 'string' ),
+								'source'      => array( 'type' => 'string' ),
 								'outcome'     => array(
 									'type' => 'string',
 									'enum' => array( 'would_apply', 'applied', 'unchanged', 'rejected', 'conflict' ),
@@ -129,7 +136,8 @@ final class Writes {
 								'warnings'    => $issues,
 								'old'         => $value,
 								'new'         => $value,
-							)
+							),
+							array( 'plural_form' => array( 'type' => 'integer' ) )
 						),
 					),
 				),
@@ -169,13 +177,15 @@ final class Writes {
 								'change_id'   => array( 'type' => 'integer' ),
 								'original_id' => array( 'type' => 'integer' ),
 								'language'    => array( 'type' => 'string' ),
+								'source'      => array( 'type' => 'string' ),
 								'outcome'     => array(
 									'type' => 'string',
 									'enum' => array( 'applied', 'unchanged', 'conflict' ),
 								),
 								'old'         => $value,
 								'new'         => $value,
-							)
+							),
+							array( 'plural_form' => array( 'type' => 'integer' ) )
 						),
 					),
 				),
@@ -188,10 +198,15 @@ final class Writes {
 		Plugin::register(
 			'get-change-log',
 			__( 'Get change log', 'string-abilities-for-translatepress' ),
-			'Paged history of the changes made by this plugin, newest first, optionally filtered by language, batch_id and since (UTC date-time). Each entry has the previous and new translation and status, the user, the note and reverted_by (id of the change that reverted it). ' . Plugin::UNTRUSTED,
+			'Paged history of the changes made by this plugin, newest first, optionally filtered by language, source, batch_id and since (UTC date-time). Each entry has the source and plural_form (null for regular strings), the previous and new translation and status, the user, the note and reverted_by (id of the change that reverted it). ' . Plugin::UNTRUSTED,
 			Plugin::input(
 				array(
 					'language' => array( 'type' => 'string' ),
+					'source'   => array(
+						'type'        => 'string',
+						'enum'        => array( 'regular', 'gettext' ),
+						'description' => 'Optional; all sources if omitted.',
+					),
 					'batch_id' => array( 'type' => 'string' ),
 					'since'    => array(
 						'type'        => 'string',
@@ -223,6 +238,8 @@ final class Writes {
 								'created_at'  => array( 'type' => 'string' ),
 								'user_id'     => array( 'type' => 'integer' ),
 								'language'    => array( 'type' => 'string' ),
+								'source'      => array( 'type' => 'string' ),
+								'plural_form' => array( 'type' => array( 'integer', 'null' ) ),
 								'original_id' => array( 'type' => 'integer' ),
 								'row_id'      => array( 'type' => 'integer' ),
 								'action'      => array( 'type' => 'string' ),
@@ -260,7 +277,8 @@ final class Writes {
 		if ( $read_only && ! $dry_run ) {
 			return self::writes_disabled();
 		}
-		$error = self::write_error( $strings ) ?? self::items_error( $strings, $items );
+		$sources = array_values( array_unique( array_map( array( Plugin::class, 'source' ), $items ) ) );
+		$error   = self::items_error( $strings, $items ) ?? self::write_error( $strings, $sources );
 		if ( $error ) {
 			return $error;
 		}
@@ -305,13 +323,13 @@ final class Writes {
 			return self::writes_disabled();
 		}
 		$strings = new Strings();
-		$error   = self::write_error( $strings );
-		if ( $error ) {
-			return $error;
-		}
 		$changes = ChangeLog::changes( (int) ( $input['change_id'] ?? 0 ), (string) ( $input['batch_id'] ?? '' ) );
 		if ( array() === $changes ) {
 			return new WP_Error( 'sat_not_found', __( 'No change with this change_id or batch_id.', 'string-abilities-for-translatepress' ), array( 'status' => 404 ) );
+		}
+		$error = self::write_error( $strings, array_values( array_unique( array_map( array( Plugin::class, 'source' ), $changes ) ) ) );
+		if ( $error ) {
+			return $error;
 		}
 
 		$batch_id  = wp_generate_uuid4();
@@ -323,9 +341,10 @@ final class Writes {
 				'change_id'   => (int) $change['id'],
 				'original_id' => (int) $change['original_id'],
 				'language'    => (string) $change['language'],
-				'outcome'     => 'conflict',
-				'old'         => self::value( (string) $change['new_value'], (int) $change['new_status'] ),
-				'new'         => self::value( (string) $change['old_value'], (int) $change['old_status'] ),
+			) + self::address( $change ) + array(
+				'outcome' => 'conflict',
+				'old'     => self::value( (string) $change['new_value'], (int) $change['new_status'] ),
+				'new'     => self::value( (string) $change['old_value'], (int) $change['old_status'] ),
 			);
 			if ( null !== $change['reverted_by'] ) {
 				$item['outcome'] = 'unchanged';
@@ -364,7 +383,7 @@ final class Writes {
 		$per_page = min( 50, max( 1, (int) ( $input['per_page'] ?? 20 ) ) );
 
 		ChangeLog::maybe_install();
-		$result  = ChangeLog::entries( (string) ( $input['language'] ?? '' ), (string) ( $input['batch_id'] ?? '' ), $since, $page, $per_page );
+		$result  = ChangeLog::entries( (string) ( $input['language'] ?? '' ), (string) ( $input['source'] ?? '' ), (string) ( $input['batch_id'] ?? '' ), $since, $page, $per_page );
 		$entries = array();
 		foreach ( $result['entries'] as $row ) {
 			$entries[] = array(
@@ -373,6 +392,8 @@ final class Writes {
 				'created_at'  => str_replace( ' ', 'T', (string) $row['created_at'] ) . 'Z',
 				'user_id'     => (int) $row['user_id'],
 				'language'    => (string) $row['language'],
+				'source'      => (string) $row['source'],
+				'plural_form' => null === $row['plural_form'] ? null : (int) $row['plural_form'],
 				'original_id' => (int) $row['original_id'],
 				'row_id'      => (int) $row['row_id'],
 				'action'      => (string) $row['action'],
@@ -404,19 +425,25 @@ final class Writes {
 		$original_id = (int) ( $item['original_id'] ?? 0 );
 		$language    = (string) ( $item['language'] ?? '' );
 		$action      = (string) ( $item['action'] ?? '' );
+		$gettext     = 'gettext' === Plugin::source( $item );
 		$result      = array(
 			'original_id' => $original_id,
 			'language'    => $language,
-			'outcome'     => 'rejected',
-			'errors'      => array(),
-			'warnings'    => array(),
-			'old'         => null,
-			'new'         => null,
+		) + self::address( $item ) + array(
+			'outcome'  => 'rejected',
+			'errors'   => array(),
+			'warnings' => array(),
+			'old'      => null,
+			'new'      => null,
 		);
 
-		$row = $strings->target_row( $language, $original_id );
+		$row = $gettext
+			? ( new Gettext() )->target_row( $language, $original_id, (int) $result['plural_form'] )
+			: $strings->target_row( $language, $original_id );
 		if ( null === $row ) {
-			$result['errors'][] = self::issue( 'sat_not_found', __( 'No row for this string in this language: unknown original_id, or TranslatePress has not created the row yet. It does so when a page showing the string is viewed in that language; this plugin never inserts rows.', 'string-abilities-for-translatepress' ) );
+			$result['errors'][] = $gettext
+				? self::issue( 'sat_not_found', __( 'No row for this gettext string and plural form in this language: unknown original_id, or TranslatePress has not created the row yet. It does so when a page showing the string (in that plural form) is viewed in that language; this plugin never inserts rows.', 'string-abilities-for-translatepress' ) )
+				: self::issue( 'sat_not_found', __( 'No row for this string in this language: unknown original_id, or TranslatePress has not created the row yet. It does so when a page showing the string is viewed in that language; this plugin never inserts rows.', 'string-abilities-for-translatepress' ) );
 			return array( $result, null );
 		}
 		$result['old'] = self::value( $row['translated'], $row['status'] );
@@ -429,9 +456,11 @@ final class Writes {
 			return array( $result, null );
 		}
 
+		// approve leaves a language_file row as it is (decision G2): status 2
+		// would freeze today's .mo text against later plugin updates.
 		list( $translated, $status ) = match ( $action ) {
 			'translate' => array( (string) ( $item['translated'] ?? '' ), 2 ),
-			'approve'   => array( $row['translated'], 2 ),
+			'approve'   => array( $row['translated'], 4 === $row['status'] ? 4 : 2 ),
 			default     => array( '', 0 ), // reset; the schema allows nothing else.
 		};
 		if ( 'translate' === $action ) {
@@ -444,7 +473,7 @@ final class Writes {
 		$result['new']    = self::value( $translated, $status );
 		$result['errors'] = self::rule_errors( $action, $row, $translated, self::flag( $item['overwrite_reviewed'] ?? false ) );
 		if ( 'translate' === $action && '' !== $translated ) {
-			$checks             = Validator::check( $row['original'], $translated, $terms );
+			$checks             = Validator::check( $row['original'], $translated, $terms, $gettext );
 			$result['errors']   = array_merge( $result['errors'], $checks['errors'] );
 			$result['warnings'] = array_merge( $result['warnings'], $checks['warnings'] );
 			if ( array() === $checks['errors'] ) {
@@ -492,6 +521,9 @@ final class Writes {
 		if ( 'approve' === $action && ( 0 === $row['status'] || '' === $row['translated'] ) ) {
 			$errors[] = self::issue( 'sat_invalid_input', __( 'Nothing to approve: the string is untranslated.', 'string-abilities-for-translatepress' ) );
 		}
+		if ( 'reset' === $action && 4 === $row['status'] ) {
+			$errors[] = self::issue( 'sat_invalid_input', __( 'This translation comes from the plugin\'s own translation file (.mo); TranslatePress would refill it from that file on the next page view, so reset is refused.', 'string-abilities-for-translatepress' ) );
+		}
 		if ( 'approve' !== $action && 2 === $row['status'] && ! $overwrite ) {
 			$errors[] = self::issue( 'sat_reviewed_protected', __( 'The current translation is human-reviewed; set overwrite_reviewed to change or reset it.', 'string-abilities-for-translatepress' ) );
 		}
@@ -510,7 +542,7 @@ final class Writes {
 	 */
 	private static function apply( Strings $strings, array $result, array $write, string $batch_id, string $note ): bool {
 		$row = $write['row'];
-		if ( ! $strings->update_row( $result['language'], $row['id'], $result['original_id'], $row['translated'], $row['status'], $write['translated'], $write['status'] ) ) {
+		if ( ! self::update_row( $strings, $result + array( 'plural_form' => null ), $row['id'], $row['translated'], $row['status'], $write['translated'], $write['status'] ) ) {
 			return false;
 		}
 		ChangeLog::record(
@@ -518,6 +550,8 @@ final class Writes {
 			$write['action'],
 			array(
 				'language'    => $result['language'],
+				'source'      => $result['source'],
+				'plural_form' => $result['plural_form'] ?? null,
 				'original_id' => $result['original_id'],
 				'row_id'      => $row['id'],
 				'old_value'   => $row['translated'],
@@ -547,7 +581,7 @@ final class Writes {
 		$current     = (string) $change['new_value'];
 		$status      = (int) $change['new_status'];
 		$row_id      = (int) $change['row_id'];
-		if ( 0 === $row_id || ! in_array( $language, $languages, true ) || ! $strings->update_row( $language, $row_id, $original_id, $current, $status, (string) $change['old_value'], (int) $change['old_status'] ) ) {
+		if ( 0 === $row_id || ! in_array( $language, $languages, true ) || ! self::update_row( $strings, $change, $row_id, $current, $status, (string) $change['old_value'], (int) $change['old_status'] ) ) {
 			return false;
 		}
 		$id = ChangeLog::record(
@@ -555,6 +589,8 @@ final class Writes {
 			'revert',
 			array(
 				'language'    => $language,
+				'source'      => Plugin::source( $change ),
+				'plural_form' => $change['plural_form'] ?? null,
 				'original_id' => $original_id,
 				'row_id'      => $row_id,
 				'old_value'   => $current,
@@ -566,6 +602,43 @@ final class Writes {
 		);
 		ChangeLog::mark_reverted( (int) $change['id'], $id );
 		return true;
+	}
+
+	/**
+	 * Conditional update of one row, in the dictionary or the gettext table.
+	 *
+	 * @param Strings              $strings        Data access.
+	 * @param array<string, mixed> $target         language, original_id, source and plural_form.
+	 * @param int                  $row_id         Row id.
+	 * @param string               $old_translated Expected current translation.
+	 * @param int                  $old_status     Expected current status.
+	 * @param string               $new_translated New translation.
+	 * @param int                  $new_status     New status.
+	 * @return bool False on conflict.
+	 */
+	private static function update_row( Strings $strings, array $target, int $row_id, string $old_translated, int $old_status, string $new_translated, int $new_status ): bool {
+		$language    = (string) $target['language'];
+		$original_id = (int) $target['original_id'];
+		if ( 'gettext' === Plugin::source( $target ) ) {
+			return ( new Gettext() )->update_row( $language, $row_id, $original_id, (int) $target['plural_form'], $old_translated, $old_status, $new_translated, $new_status );
+		}
+		return $strings->update_row( $language, $row_id, $original_id, $old_translated, $old_status, $new_translated, $new_status );
+	}
+
+	/**
+	 * Source, and plural form for gettext, of an item or change.
+	 *
+	 * @param array<string, mixed> $item Input item or change-log row.
+	 * @return array{source: string, plural_form?: int}
+	 */
+	private static function address( array $item ): array {
+		if ( 'gettext' !== Plugin::source( $item ) ) {
+			return array( 'source' => 'regular' );
+		}
+		return array(
+			'source'      => 'gettext',
+			'plural_form' => (int) ( $item['plural_form'] ?? 0 ),
+		);
 	}
 
 	/**
@@ -589,18 +662,27 @@ final class Writes {
 	}
 
 	/**
-	 * Error if the schema is not recognised; installs the change log if needed.
+	 * Error if the schema of a source written to is not recognised; installs
+	 * the change log if needed.
 	 *
-	 * @param Strings $strings Data access.
+	 * @param Strings  $strings Data access.
+	 * @param string[] $sources Sources written to.
 	 * @return WP_Error|null
 	 */
-	private static function write_error( Strings $strings ): ?WP_Error {
+	private static function write_error( Strings $strings, array $sources ): ?WP_Error {
 		ChangeLog::maybe_install();
-		return $strings->schema_error();
+		foreach ( $sources as $source ) {
+			$error = $strings->schema_error( $source, true );
+			if ( $error ) {
+				return $error;
+			}
+		}
+		return null;
 	}
 
 	/**
-	 * Error if an item names an invalid language, or two items target the same string and language.
+	 * Error if an item names an invalid language, gives plural_form for a
+	 * regular string, or two items target the same string and language.
 	 *
 	 * @param Strings                    $strings Data access.
 	 * @param list<array<string, mixed>> $items   Input items.
@@ -609,10 +691,14 @@ final class Writes {
 	private static function items_error( Strings $strings, array $items ): ?WP_Error {
 		$keys = array();
 		foreach ( $items as $item ) {
-			$keys[] = (int) ( $item['original_id'] ?? 0 ) . '|' . (string) ( $item['language'] ?? '' );
+			$error = Plugin::gettext_only_error( $item, Plugin::source( $item ), array( 'plural_form' ) );
+			if ( $error ) {
+				return $error;
+			}
+			$keys[] = implode( '|', self::address( $item ) ) . '|' . (int) ( $item['original_id'] ?? 0 ) . '|' . (string) ( $item['language'] ?? '' );
 		}
 		if ( count( $keys ) !== count( array_unique( $keys ) ) ) {
-			return new WP_Error( 'sat_invalid_input', __( 'Each original_id and language pair may appear only once per call.', 'string-abilities-for-translatepress' ), array( 'status' => 400 ) );
+			return new WP_Error( 'sat_invalid_input', __( 'Each string (original_id, with source and plural_form) and language may appear only once per call.', 'string-abilities-for-translatepress' ), array( 'status' => 400 ) );
 		}
 		return Plugin::language_error( $strings, array_values( array_unique( array_map( static fn( array $item ): string => (string) ( $item['language'] ?? '' ), $items ) ) ) );
 	}
