@@ -37,14 +37,13 @@ Mirror `github.com/jacamac/beds24-availability-calendar` (may be renamed to `ava
 
 ## Differences from the reference repo
 
-Read at Stage 1 (2026-10-23): `jacamac/availability-calendar-for-beds24` (renamed from `beds24-availability-calendar`), `main` at v1.10.1. Mirrored: `ubuntu-24.04` pinned runners, `actions/checkout@v7`, `shivammathur/setup-php@v2` on PHP 8.1, `actions/cache@v6` for `vendor/`, PHPCS through `cs2pr`, PHPStan with `szepeviktor/phpstan-wordpress`, committed `composer.lock`, tag-triggered `release.yml` with a zip smoke test, `softprops/action-gh-release` pinned by SHA.
+Read at Stage 1 (2026-10-23): `jacamac/availability-calendar-for-beds24` (renamed from `beds24-availability-calendar`), `main` at v1.10.1. Mirrored: Plugin Update Checker bundled in `vendor/` and `dev-release.yml` (owner decision, spec revision 7), `ubuntu-24.04` pinned runners, `actions/checkout@v7`, `shivammathur/setup-php@v2` on PHP 8.1, `actions/cache@v6` for `vendor/`, PHPCS through `cs2pr`, PHPStan with `szepeviktor/phpstan-wordpress`, committed `composer.lock`, tag-triggered `release.yml` with a zip smoke test, `softprops/action-gh-release` pinned by SHA.
 
 Where this repo differs, the spec wins, for these reasons:
 
 | Reference repo | Here | Why |
 |---|---|---|
-| Dev branch `development`; `dev-release.yml` publishes a rolling `dev-latest` zip | `develop`; no dev-release workflow | Spec §10; the dev site tracks `develop` with Git Updater |
-| Plugin Update Checker shipped in `vendor/` (runtime Composer dependency) | Git Updater headers only; no runtime dependencies, classes loaded with `require_once` | Spec §10 header list; minimum code |
+| Dev branch `development` | `develop`; same `dev-release.yml` rolling `dev-latest` zip, triggered from `develop` | Name only; the owner does not mind (spec §10) |
 | `ci.yml` only on PRs to `main` (lint on push via `dev-release.yml`) | `ci.yml` on every push and PR | Leak checks must run on every push (spec §9) |
 | No secret scanning, no deny-list check | gitleaks (binary, checksum-pinned) and `bin/check-private-terms.sh` in CI and pre-commit | Spec §9 |
 | `composer audit`, ESLint, Stylelint, `node --test` | PHPCS, PHPStan, PHPUnit, version check, leak checks — nothing else | Spec §9; no JS/CSS in this plugin |

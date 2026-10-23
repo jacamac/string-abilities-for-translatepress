@@ -3,7 +3,7 @@
 WordPress plugin that registers a small set of **WordPress Abilities** for reading, reviewing and correcting TranslatePress string translations. It ships **no MCP server and no REST routes**: abilities are exposed by whatever already exposes the site's abilities (core `/wp-json/wp-abilities/v1/`, a hosting provider's MCP connector, the MCP Adapter plugin).
 
 > Audience: Claude Code. Owner: GitHub `jacamac`. GPL-2.0-or-later, to be published.
-> Spec revision 6 (2026-10-23) — adds Stage 2b: plugin and theme (gettext) strings.
+> Spec revision 7 (2026-10-23) — updates through Plugin Update Checker as in the owner's other plugin; case-insensitive search; `…` normalisation.
 > Legend: **[VERIFY]** believed true, confirm in TranslatePress / WordPress source before relying on it.
 
 ---
@@ -41,7 +41,7 @@ README states the plugin is **not affiliated with or endorsed by TranslatePress 
 - **Reference site** (private, do not mention in the repo): WordPress 7.1, PHP 8.4, MySQL 8.4, TranslatePress 3.3.8 (+ a paid add-on), Redis object cache, 5 languages.
 - TranslatePress 3.3.8 already registers abilities in the `translatepress/` namespace for languages, license and enabling automatic translation. **None cover strings, and none read the automatic-translation state.** Do not duplicate them.
 - **Typical workflow the plugin serves:** owner edits source-language text → TranslatePress machine-translates → an AI agent reviews, approves or corrects translations in several languages at once.
-- **Environments:** dev = a hosted test site with free TranslatePress, Git Updater tracking `develop`; production = Git Updater tracking `main`. **No local WordPress or Docker required**; CI runs on GitHub Actions.
+- **Environments:** dev = a test site with free TranslatePress that installs the rolling `dev-latest` build of `develop`; production = tagged releases from `main`. Both update through the bundled Plugin Update Checker (§10). **No local WordPress or Docker required**; CI runs on GitHub Actions.
 
 ---
 
@@ -97,7 +97,7 @@ Stages 1 and 2 cover regular (page) strings. Stage 2b extends the same abilities
 | Ability | Input | Output |
 |---|---|---|
 | `get-stats` | `language?` | Per language: counts untranslated / machine / human |
-| `search-strings` | `language` (required), `status?` (array), `query?` (substring on original or translation, normalised per §5.4), `page`, `per_page` (≤ 50) | Items `original_id`, `original`, `translated`, `status`; paging (`page`, `per_page`, `total`, `truncated` when the §5.4 candidate cap was hit) |
+| `search-strings` | `language` (required), `status?` (array), `query?` (substring on original or translation, normalised per §5.4 and **case-insensitive**), `page`, `per_page` (≤ 50) | Items `original_id`, `original`, `translated`, `status`; paging (`page`, `per_page`, `total`, `truncated` when the §5.4 candidate cap was hit) |
 | `get-strings` | exactly one of `original_ids[]` or `originals[]` (text, ≤ 20 each, matched per §5.4); `languages?` | Per original: `original_id`, `original` (as stored), `translations` `{ lang: { translated, status } }`, `warnings[]` (e.g. `sat_duplicate_rows`); plus `not_found[]` |
 | `get-auto-translation-settings` | — | `enabled`, `manual_only`, `engine`, `languages` (translation languages minus default, **not** checked against engine support: TP's engine code mapping can make an HTTP call, owner decision at Stage 1, INTERNALS §10 item 18). Read with `get_option` and an explicit key allowlist; no TP method calls. **Never** API keys, license data or notification email |
 
@@ -153,7 +153,7 @@ Raised outside `Validator`: `sat_sanitization_changed` (error), `sat_duplicate_r
 
 Originals are stored exactly as emitted in the page HTML: text nodes keep entities (`&amp;`, `&#8217;`), attributes are decoded (SCHEMA §4). Text a person or agent types will therefore rarely match byte for byte.
 
-`normalize(string): string` — decode HTML entities, map typographic apostrophes/quotes/dashes and non-breaking spaces to their plain equivalents, collapse internal whitespace, trim. Case and accents are kept.
+`normalize(string): string` — decode HTML entities, map typographic apostrophes/quotes/dashes, the ellipsis `…` (→ `...`) and non-breaking spaces to their plain equivalents, collapse internal whitespace, trim. Case and accents are kept. `search-strings` additionally compares lower-cased (`mb_strtolower`); `get-strings` stays case-sensitive because it identifies a precise string.
 
 - `get-strings` `originals[]`: find candidates in `trp_original_strings` with a `LIKE` on the longest word of the input (≥ 4 characters, entity-free, cap 200 candidates), then keep those whose `normalize(original)` equals `normalize(input)`. Several matches → return them all.
 - `search-strings` `query`: same candidate approach on the dictionary, filtered in PHP with normalised `str_contains` on original and translation.
@@ -188,7 +188,7 @@ Scope may shrink after the discovery (e.g. leave plurals read-only) — any redu
 
 One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `user_id`, `language`, `original_id`, `action` (`translate`|`approve`|`reset`|`revert`), `old_value`, `old_status`, `new_value`, `new_status`, `note`, `reverted_by` (nullable). `dbDelta` on activation; option `sat_db_version`.
 
-`uninstall.php` drops the table and plugin options. Never touches TranslatePress tables.
+`uninstall.php` drops the table and plugin options and removes the `translation_agent` role and the plugin's capabilities. Never touches TranslatePress tables.
 
 ---
 
@@ -249,8 +249,9 @@ A leak found after a push is handled by rotating the credential first, then rewr
 First read `github.com/jacamac/beds24-availability-calendar` (published as *Availability Calendar for Beds24*; repo may have been renamed) and mirror its structure and workflows. Where it differs from below, follow it and note the difference in `CLAUDE.md`.
 
 - **Versioning:** SemVer from `0.1.0`. `Version:` header = `SAT_VERSION` = `Stable tag:` in `readme.txt` (CI check).
-- **Header:** Plugin Name, Plugin URI, Description, Version, Requires at least 6.9, Requires PHP 8.1, Requires Plugins, Author `jacamac`, Author URI https://github.com/jacamac, License GPL-2.0-or-later, License URI, Text Domain, `GitHub Plugin URI: jacamac/string-abilities-for-translatepress`, `GitHub Branch: main`, `Primary Branch: main`.
-- **Branches:** `develop` (dev site) / `main` (production).
+- **Header:** Plugin Name, Plugin URI, Description, Version, Requires at least 6.9, Requires PHP 8.1, Requires Plugins, Author `jacamac`, Author URI https://github.com/jacamac, License GPL-2.0-or-later, License URI, Text Domain. No Git Updater headers.
+- **Updates — mirror the reference repo exactly:** bundle Plugin Update Checker in `vendor/` as the reference plugin does (same library, same version constraint, same integration pattern), pointing at this repo's GitHub releases. This is the only runtime dependency; it is the owner's standard across plugins. `dev-release.yml` (as in the reference repo) publishes a rolling `dev-latest` pre-release zip on every push to `develop` that passes CI; production installs only tagged releases. If the plugin is ever submitted to wordpress.org, that build must exclude the update checker (wordpress.org does not allow self-updating plugins [VERIFY current guideline]).
+- **Branches:** `develop` (dev site, `dev-latest` builds) / `main` (production, tagged releases).
 - **Release:** merge `develop` → `main`, bump version, move `Unreleased` to the new version in `CHANGELOG.md`, sync `readme.txt`, commit `Release vX.Y.Z`, tag `vX.Y.Z`. `release.yml` builds a clean zip (no `.git`, `.github`, `tests`, `docs`, dev config, dev dependencies) and creates the GitHub Release with that version's changelog section as body.
 - **Release notes:** `CHANGELOG.md`, Keep a Changelog format; every behaviour change adds an entry under Added / Changed / Fixed / Removed / **Security**.
 - **Repo files:** `README.md`, `readme.txt`, `CHANGELOG.md`, `SECURITY.md`, `LICENSE` (full GPL-2.0 text), `CLAUDE.md`, `docs/`, `.github/workflows/{ci,release}.yml`, `bin/check-private-terms.sh`, `.pre-commit-config.yaml`, `composer.json`, `phpcs.xml.dist`, `phpstan.neon.dist`, `phpunit.xml.dist`, `.gitignore`, `.gitattributes` (export-ignore dev files).
