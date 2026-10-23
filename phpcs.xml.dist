@@ -45,10 +45,12 @@
 		</properties>
 	</rule>
 
-	<!-- TranslatePress tables have no WordPress API, and reads must reflect the
-	     current database: every query is a prepared direct query by design. -->
+	<!-- TranslatePress tables and the change log have no WordPress API, and
+	     reads must reflect the current database: every query is a prepared
+	     direct query by design. -->
 	<rule ref="WordPress.DB.DirectDatabaseQuery">
 		<exclude-pattern>src/Strings.php</exclude-pattern>
+		<exclude-pattern>src/ChangeLog.php</exclude-pattern>
 	</rule>
 
 	<!-- Classes follow PSR-4 (src/Plugin.php), not class-*.php. -->

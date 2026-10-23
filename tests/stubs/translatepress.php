@@ -1,7 +1,7 @@
 <?php
 /**
  * PHPStan-only declarations of the TranslatePress 3.3.8 API the plugin calls.
- * Signatures from TP/class-translate-press.php and TP/includes/queries/class-query.php.
+ * Signatures from TP/class-translate-press.php, TP/includes/queries/class-query.php and TP/includes/functions.php.
  *
  * @package StringAbilities
  */
@@ -31,3 +31,10 @@ class TRP_Query {
 	/** @return string */
 	public function get_table_name_for_original_strings() {}
 }
+
+/**
+ * @param mixed $filtered        Text.
+ * @param bool  $execute_wp_kses Also run wp_kses_post.
+ * @return string
+ */
+function trp_sanitize_string( $filtered, $execute_wp_kses = true ) {}

@@ -175,6 +175,8 @@ Verified **not** to exist: `trp_translate_string` and `trp_get_translation` (SCH
 16. **Abilities API, destructive + idempotent → HTTP DELETE.** Query-string input is not JSON-decoded, so TP deliberately avoids this combination (`WP/rest-api/endpoints/class-wp-rest-abilities-v1-run-controller.php:110-133`, `TP/includes/class-abilities.php:259-265`).
 17. **Abilities API, callbacks without an input schema get no argument at all** (`WP/abilities-api/class-wp-ability.php:505-512`).
 18. **Engine language codes need an HTTP-capable lookup.** Matching a language against `trp_db_stored_data['trp_mt_supported_languages'][engine]['languages']` goes through each engine's `get_engine_specific_language_codes()` (e.g. `TP/includes/mtapi/class-mtapi-machine-translator.php:221-231`, filter `trp_mtapi_source_language`). That calls `TRP_Languages::get_iso_codes()` (`TP/includes/class-languages.php:177`, filter `trp_map_wp_codes_to_google`), which calls `get_wp_languages()` → `wp_get_available_translations()` (`:154-165`) [code]. [inferred] On a cold `available_translations` site transient this is an HTTP call to wordpress.org. This is why `get-auto-translation-settings` returns the languages unfiltered (owner decision, Stage 1).
+19. **Abilities API, empty objects over REST.** The run controller returns the execute result through `rest_ensure_response()` unchanged (`WP/rest-api/endpoints/class-wp-rest-abilities-v1-run-controller.php:93-98`), so an empty `stdClass` (e.g. `get-strings` `translations` with no row) is sent as `{}` [code]. The list controller even turns an empty `default` of an object schema into `{}` on purpose (`WP/rest-api/endpoints/class-wp-rest-abilities-v1-list-controller.php:208-215`, applied at `:233`) [code]. A hosting connector showed that same `default` as `[]` (Stage 2): it re-encodes JSON objects as arrays, so `[]` seen through it may be `{}` on the wire [inferred from that observation].
+20. **MySQL 8 and empty dates.** A `DATETIME` column compared with `''` (e.g. `created_at >= ''`) failed the whole query on the dev site, even inside `('' = '' OR …)`; `$wpdb` then returns `null` and the error is easy to miss [inferred from the dev-site symptom: `get-change-log` empty while `revert` read the same table]. Add a condition only when its filter is set.
 
 ## 10a. Which duplicate row TranslatePress renders (decision A)
 
@@ -193,6 +195,26 @@ Read in `Q:94-170` (`get_existing_translations()`) and `R:2062`, `R:2096-2113` (
 3. otherwise the first row (all untranslated).
 
 Any other row for that `original_id` is reported with `sat_duplicate_rows`. Known gap [inferred]: render does not filter `block_type`, so a `block_type = 2` row with byte-identical text could be the rendered one. Decision C excludes those rows, and a deprecated block's HTML original rarely equals a plain string.
+
+## 10b. String Translation counts vs `get-stats`
+
+Read at Stage 2 in `get_originals_results()` (`H` = `TP/includes/string-translation/class-string-translation-helper.php`), called for regular strings from `TP/includes/string-translation/class-string-translation-api-regular.php:26-32` with filters `status` and `block_type`. All [code] unless marked.
+
+- **The count is `SELECT COUNT(*)`, not `COUNT(DISTINCT …)`** (`H:240`, run at `H:350`, `H:366`). The listed page uses `SELECT DISTINCT original_strings.id` (`H:241`), so the count can exceed what the list shows.
+- **"All statuses" is no status filter.** Ticking every status box empties the status list (`H:59-62`). Without a status or block-type filter and without a search, no dictionary table is joined at all (`H:245-254`). The count is then every row of `trp_original_strings` (`H:243`), **the same number for every language**. It includes:
+  - originals with no row in that language (seen only in other languages, or before the language was added). No status filter can match them: `LEFT JOIN … WHERE lang.status = N` drops rows with no match;
+  - originals whose only rows in that language have `block_type 2`, `original_id` mismatches, or stale links;
+  - duplicate originals (no UNIQUE key, `Q:579-581`).
+- **Per-status counts include duplicate rows.** The status filter joins `{dict} AS lang ON lang.original_id = original_strings.id` (`H:144-146`) and adds `lang.status = N` (`H:113-142`). `COUNT(*)` then counts one per **matching dictionary row**: an original with two rows of the same status counts twice, and one with rows of different statuses counts once in each filter.
+- **No `block_type` filter** unless the separate translation-block filter is set (`H:216-222`, `H:252-254`), so `block_type 2` rows are counted.
+- **Status 3 (similar) is in no filter.** The regular filters are `human_reviewed` (2), `machine_translated` (1) and `not_translated` (0) (`TP/includes/string-translation/class-string-translation.php:173-184`, mapped through `get_constant_*` at `H:53-57`; the gettext-only filter is removed at `H:49-51`). `get-stats` counts status 3 as `machine` (decision B).
+- **Viewing String Translation inserts rows.** For originals on the listed page that have no row in a language, it calls `process_strings()` (`class-string-translation-api-regular.php:44-56`), which inserts them and may machine-translate them (§10 item 1). Counts can therefore change just by browsing it.
+
+**Why TranslatePress is higher than `get-stats` per status:** `get-stats` counts one row per `original_id` (the rendered one, §10a) and only `block_type IN (0, 1)`. TranslatePress counts every duplicate row and `block_type 2` rows. Two effects go the other way, so the gap is the net: TranslatePress leaves out status 3, and its join leaves out rows whose `original_id` is `NULL`, `0` or not in `trp_original_strings`, which `get-stats` counts [inferred from `Strings::stats()`, whose first query has no `original_id` condition].
+
+**Why "all statuses" exceeds the sum of the three filters:** mainly originals with no row in that language, plus originals with only `block_type 2` rows, minus the duplicates and status-3 rows above.
+
+[inferred] To confirm on a site, per language: `SELECT COUNT(*) FROM {originals}` (TranslatePress "all"), `SELECT status, COUNT(*) FROM {originals} o JOIN {dict} d ON d.original_id = o.id GROUP BY status` (TranslatePress per status), against `get-stats`.
 
 ## 11. What is likely to break on a TranslatePress update
 

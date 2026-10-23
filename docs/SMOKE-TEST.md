@@ -1,6 +1,6 @@
 # Smoke test
 
-Manual check on the dev site (free TranslatePress), through the hosting connector's `execute_ability` or `/wp-json/wp-abilities/v1/abilities/string-abilities/<name>/run` (GET for reads). About 10 minutes. Use real site strings while testing, but never copy them into the repo, an issue or a commit message.
+Manual check on the dev site (free TranslatePress), through the hosting connector's `execute_ability` or `/wp-json/wp-abilities/v1/abilities/string-abilities/<name>/run` (GET for reads). About 10 minutes for reads, 15 for writes. Use real site strings while testing, but never copy them into the repo, an issue or a commit message.
 
 Record the plugin version, WordPress and TranslatePress versions, and the date in the release notes of your own checklist, not here.
 
@@ -17,4 +17,17 @@ Record the plugin version, WordPress and TranslatePress versions, and the date i
 
 ## Write (Stage 2, 0.2.0)
 
-Added in Stage 2 (REQUIREMENTS §9).
+Writes are POST (`update-translations`, `revert`); `get-change-log` is GET. Purge or bypass any page cache before each front-end check. Pick two languages `L1` and `L2` and, with `get-strings`, a string `A` that is machine-translated in both, a string `B` that is human in `L1`, and an `original_id` `C` that has no row in `L2` (e.g. a string seen only in `L1`; compare `translations` of a few ids). Note each `translated` value: it is the `expected_current` below.
+
+1. **Abilities listed.** `update-translations`, `revert` and `get-change-log` appear next to the four read abilities. Plugins screen shows `0.2.0-dev.N`.
+2. **Dry run with a warning.** `update-translations` without `dry_run`, one item: `A` in `L1`, `action: translate`, a corrected text that adds a number absent from the original. Output: `dry_run: true`, outcome `would_apply`, warning `sat_numbers_mismatch`, no `batch_id`. `get-strings` for `A` shows the old text.
+3. **Apply on several languages in one call.** Same call with `dry_run: false` and two items: `A` in `L1` (`translate`, a text without invented numbers) and `A` in `L2` (`translate`). Both `applied`; one `batch_id` returned. Write it down.
+4. **Front end and editor.** Open the page with `A` in `L1` and `L2`: the new texts show. In the TranslatePress editor, `A` is human-reviewed in both.
+5. **Approve.** Find another machine string `D` in `L1`; `approve` it with `dry_run: false`. Outcome `applied`, `new.status: human`, same text. Approving it again: `unchanged`.
+6. **Human translation protected.** `translate` `B` in `L1` with `dry_run: false` and no `overwrite_reviewed`: outcome `rejected`, error `sat_reviewed_protected`. With `overwrite_reviewed: true` (keep `dry_run` default): `would_apply`.
+7. **Stale `expected_current`.** Repeat step 3's item for `A` in `L1` with the old `expected_current` from before step 3: outcome `conflict`, nothing written.
+8. **No row.** `translate` `C` in `L2`: outcome `rejected`, error `sat_not_found` with the "viewed in that language" message. `get-stats` for `L2` unchanged.
+9. **Unsafe HTML.** With the current `expected_current` (a stale one is a `conflict` before any check), `translate` `A` in `L1` with a `<script>` tag or an `onclick` added: `rejected`, `sat_html_mismatch`. With a bare `&` (dry run): `would_apply`, warning `sat_ampersand_encoded`, `new` shows `&amp;`. With `%ab` in the text: `rejected`, `sat_sanitization_changed`.
+10. **Change log.** `get-change-log` with step 3's `batch_id`: two entries, action `translate`, old and new values and statuses, `reverted_by: null`.
+11. **Revert a batch.** `revert` with step 3's `batch_id`: both `applied`, a new `batch_id`. `get-strings` and the front end show the original machine texts with status `machine`. `get-change-log` shows two `revert` entries; the step 3 entries now have `reverted_by`. The same `revert` again: both `unchanged`.
+12. **Read-only switch.** `wp option update sat_read_only 1` (or `define( 'SAT_READ_ONLY', true );`): `update-translations` with `dry_run: false` and `revert` return `sat_writes_disabled`; a dry run still works and returns `writes_disabled: true`; reads still work. Set it back to `0`.

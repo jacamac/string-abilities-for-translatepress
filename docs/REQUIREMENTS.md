@@ -128,7 +128,7 @@ Write mechanics (SCHEMA §5, §11):
 - Final text = `Validator` → `wp_kses` (allowlist from the original's tags) → `trp_sanitize_string()`. If that pipeline changes the text, the item is rejected with `sat_sanitization_changed` (e.g. `%xx` sequences, which TranslatePress strips) rather than storing something different from what was validated.
 - Table names only via `TRP_Query::get_table_name()` for codes in `trp_settings['translation-languages']` minus the default.
 - **No row, no write:** an original with no dictionary row yet in the target language cannot be written (the plugin never inserts). The item is rejected with `sat_not_found` and a message saying TranslatePress creates the row when the page is viewed in that language. `get-strings` shows such a language as absent from `translations`.
-- Stage 2 first confirms in `class-string-translation-helper.php` why TranslatePress's String Translation "all statuses" count exceeds the sum of its three status filters (observed on the dev site: about 40 more), and records it in INTERNALS. Expected: originals with no row in that language, plus excluded `block_type 2` rows.
+- Stage 2 first confirms in `class-string-translation-helper.php` why TranslatePress's String Translation "all statuses" count exceeds the sum of its three status filters (observed on the dev site: about 40 more), and records it in INTERNALS. Expected: originals with no row in that language, plus excluded `block_type 2` rows. **Done** (INTERNALS §10b): "all statuses" counts every row of `trp_original_strings` (same for every language); per-status counts are `COUNT(*)` over joined rows, so they include duplicate rows and `block_type 2`, and exclude status 3.
 - No cache invalidation (TP's only cache group is request-scoped). Full-page caches are outside the plugin; README says so in one line.
 
 Output: `dry_run`, `batch_id` (only when written), `items[]` with `original_id`, `language`, `outcome` (`would_apply` | `applied` | `unchanged` | `rejected` | `conflict`), `errors[]`, `warnings[]`, `old` `{ translated, status }`, `new` `{ translated, status }`.
@@ -148,6 +148,8 @@ Warnings (never block):
 - `sat_numbers_mismatch` — a digit sequence appears in the translation but not in the original, or vice versa (catches invented dates, dropped prices).
 - `sat_identical_to_original` — translation equals the original (likely missed translation).
 - `sat_protected_term_missing` — a `protected_terms` entry present in the original is absent or altered in the translation (case-sensitive).
+
+Before validation, a bare `&` (not starting a valid HTML entity) in `translated` is converted to `&amp;` (`Validator::encode_ampersands()`), reported as warning `sat_ampersand_encoded`.
 
 Raised outside `Validator`: `sat_sanitization_changed` (error), `sat_duplicate_rows` (warning). Ability-level errors (`WP_Error`): `sat_invalid_language`, `sat_invalid_input` (e.g. both or neither of `original_ids` / `originals`), `sat_not_found`, `sat_writes_disabled`, `sat_schema_unsupported`.
 
@@ -188,7 +190,7 @@ Scope may shrink after the discovery (e.g. leave plurals read-only) — any redu
 
 ## 6. Data
 
-One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `user_id`, `language`, `original_id`, `action` (`translate`|`approve`|`reset`|`revert`), `old_value`, `old_status`, `new_value`, `new_status`, `note`, `reverted_by` (nullable). `dbDelta` on activation; option `sat_db_version`.
+One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `user_id`, `language`, `original_id`, `row_id` (dictionary row written; revert targets it with the same conditional `UPDATE`, never a row found by value), `action` (`translate`|`approve`|`reset`|`revert`), `old_value`, `old_status`, `new_value`, `new_status`, `note`, `reverted_by` (nullable). `dbDelta` on activation; option `sat_db_version`.
 
 `uninstall.php` drops the table and plugin options and removes the `translation_agent` role and the plugin's capabilities. Never touches TranslatePress tables.
 
@@ -197,7 +199,7 @@ One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `u
 ## 7. Security
 
 1. Capabilities `sat_read`, `sat_manage`. Activation creates role `translation_agent` (`read`, `sat_read`, `sat_manage`) and grants both caps to `administrator`. Each `permission_callback` checks its cap. Never `manage_options`.
-2. Read-only switch: constant `SAT_READ_ONLY` or option `sat_read_only` → write abilities return `sat_writes_disabled`. This and `sat_schema_unsupported` are returned from the **execute** callback: a `WP_Error` from a permission callback is replaced by a generic error (SCHEMA §12). Permission callbacks only check capabilities.
+2. Read-only switch: constant `SAT_READ_ONLY` or option `sat_read_only` → `revert` and real writes of `update-translations` return `sat_writes_disabled`; dry runs stay allowed and report `writes_disabled: true` (owner, Stage 2). This and `sat_schema_unsupported` are returned from the **execute** callback: a `WP_Error` from a permission callback is replaced by a generic error (SCHEMA §12). Permission callbacks only check capabilities.
 3. HTML and placeholder validation per §5.3 (stored-XSS protection: translations render publicly).
 4. Limits per §5. SQL only via `$wpdb->prepare`; table names built only from the validated list of configured languages.
 5. Schema guard: on first use per TranslatePress version, check expected columns (cached). Mismatch → writes return `sat_schema_unsupported`; reads still work if their columns exist.
@@ -214,12 +216,15 @@ Not in v1 (→ LATER.md): rate limiting, admin UI, approval queue, dry-run token
 ```
 string-abilities-for-translatepress.php   header, constants, bootstrap, activation/deactivation
 uninstall.php
-src/Plugin.php        registers category, abilities, capabilities/role
-src/Strings.php       access to TranslatePress tables, schema guard, settings read
+src/Plugin.php        registers category, read abilities, capabilities/role; shared registration helpers
+src/Writes.php        write abilities and get-change-log, with the §5.2 item rules
+src/Strings.php       access to TranslatePress tables, schema guard, settings read, conditional update
 src/Validator.php     pure PHP, no WordPress calls: errors + warnings + normalize()
 src/ChangeLog.php     change table, batches, revert
 tests/ValidatorTest.php
 ```
+
+Stage 2 split (owner asked for a decision): the write abilities went into `src/Writes.php` because their per-item rules are a separate flow from the thin read callbacks and would have pushed `Plugin.php` to about 1 000 lines; `Strings.php` stays whole because it remains the single place that touches TranslatePress tables.
 
 If a file passes ~300 lines, reconsider before splitting. Ability callbacks are thin: validate input → call `Strings` / `ChangeLog` → shape output.
 
@@ -228,7 +233,7 @@ If a file passes ~300 lines, reconsider before splitting. Ability callbacks are 
 ## 9. Testing — the whole budget
 
 **Automated (PHPUnit on plain PHP, seconds, no WordPress):** `ValidatorTest`, ~15 cases:
-identical markup passes · added `<script>` · added `onclick` · changed `href` · dropped tag · renamed attribute · placeholder count · invalid UTF-8 · over-length · invented number · dropped number · identical to original · protected term missing · protected term present · plain text passes; plus `normalize()`: entity vs literal · typographic vs straight apostrophe · non-breaking vs plain space · accents preserved.
+identical markup passes · added `<script>` · added `onclick` · changed `href` · dropped tag · renamed attribute · placeholder count · invalid UTF-8 · over-length · invented number · dropped number · identical to original · protected term missing · protected term present · plain text passes · bare `&` encoded (owner, Stage 2); plus `normalize()`: entity vs literal · typographic vs straight apostrophe · non-breaking vs plain space · accents preserved.
 
 Add a pure-function test for write rules (conflict, overwrite_reviewed, approve on untranslated) **only** if Stage 0 shows they can be isolated without WordPress. Never build WordPress mocks.
 
