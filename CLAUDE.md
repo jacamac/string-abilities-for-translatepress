@@ -37,4 +37,19 @@ Mirror `github.com/jacamac/beds24-availability-calendar` (may be renamed to `ava
 
 ## Differences from the reference repo
 
-(Fill in at Stage 1.)
+Read at Stage 1 (2026-10-23): `jacamac/availability-calendar-for-beds24` (renamed from `beds24-availability-calendar`), `main` at v1.10.1. Mirrored: `ubuntu-24.04` pinned runners, `actions/checkout@v7`, `shivammathur/setup-php@v2` on PHP 8.1, `actions/cache@v6` for `vendor/`, PHPCS through `cs2pr`, PHPStan with `szepeviktor/phpstan-wordpress`, committed `composer.lock`, tag-triggered `release.yml` with a zip smoke test, `softprops/action-gh-release` pinned by SHA.
+
+Where this repo differs, the spec wins, for these reasons:
+
+| Reference repo | Here | Why |
+|---|---|---|
+| Dev branch `development`; `dev-release.yml` publishes a rolling `dev-latest` zip | `develop`; no dev-release workflow | Spec §10; the dev site tracks `develop` with Git Updater |
+| Plugin Update Checker shipped in `vendor/` (runtime Composer dependency) | Git Updater headers only; no runtime dependencies, classes loaded with `require_once` | Spec §10 header list; minimum code |
+| `ci.yml` only on PRs to `main` (lint on push via `dev-release.yml`) | `ci.yml` on every push and PR | Leak checks must run on every push (spec §9) |
+| No secret scanning, no deny-list check | gitleaks (binary, checksum-pinned) and `bin/check-private-terms.sh` in CI and pre-commit | Spec §9 |
+| `composer audit`, ESLint, Stylelint, `node --test` | PHPCS, PHPStan, PHPUnit, version check, leak checks — nothing else | Spec §9; no JS/CSS in this plugin |
+| Version injected from the tag at build time | Version committed in the three places; CI and `release.yml` fail if they differ from each other or from the tag | Spec §10 |
+| Release notes from the `readme.txt` changelog | Release notes from the `CHANGELOG.md` section | Spec §10 |
+| Zip built with an `rsync --exclude` list | Zip built with `git archive`, which honours `export-ignore` in `.gitattributes` | One exclusion list (spec §10 asks for `.gitattributes`) |
+| `phpcs.xml`, `phpstan.neon`; `CLAUDE.md` git-ignored | `*.dist` names; `CLAUDE.md` committed | Spec §10 repo file list |
+| PHP 7.4, WordPress 5.9, PHPStan 1.x, `Domain Path: /languages` | PHP 8.1, WordPress 6.9, PHPStan 2.x, no `languages/` | Spec §2; no translation files yet |
