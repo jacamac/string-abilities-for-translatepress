@@ -2,7 +2,7 @@
 
 WordPress plugin that registers a small set of **WordPress Abilities** for reading, reviewing and correcting TranslatePress string translations. It ships **no MCP server and no REST routes**: abilities are exposed by whatever already exposes the site's abilities (core `/wp-json/wp-abilities/v1/`, a hosting provider's MCP connector, the MCP Adapter plugin).
 
-> Audience: Claude Code. Owner: Jacques Leisy (GitHub `jacamac`). GPL-2.0-or-later, to be published.
+> Audience: Claude Code. Owner: GitHub `jacamac`. GPL-2.0-or-later, to be published.
 > Spec revision 5 (2026-10-23) — Stage 0 findings and decisions A–G applied.
 > Legend: **[VERIFY]** believed true, confirm in TranslatePress / WordPress source before relying on it.
 
@@ -224,7 +224,7 @@ A leak found after a push is handled by rotating the credential first, then rewr
 First read `github.com/jacamac/beds24-availability-calendar` (published as *Availability Calendar for Beds24*; repo may have been renamed) and mirror its structure and workflows. Where it differs from below, follow it and note the difference in `CLAUDE.md`.
 
 - **Versioning:** SemVer from `0.1.0`. `Version:` header = `SAT_VERSION` = `Stable tag:` in `readme.txt` (CI check).
-- **Header:** Plugin Name, Plugin URI, Description, Version, Requires at least 6.9, Requires PHP 8.1, Requires Plugins, Author Jacques Leisy, Author URI https://github.com/jacamac, License GPL-2.0-or-later, License URI, Text Domain, `GitHub Plugin URI: jacamac/string-abilities-for-translatepress`, `GitHub Branch: main`, `Primary Branch: main`.
+- **Header:** Plugin Name, Plugin URI, Description, Version, Requires at least 6.9, Requires PHP 8.1, Requires Plugins, Author `jacamac`, Author URI https://github.com/jacamac, License GPL-2.0-or-later, License URI, Text Domain, `GitHub Plugin URI: jacamac/string-abilities-for-translatepress`, `GitHub Branch: main`, `Primary Branch: main`.
 - **Branches:** `develop` (dev site) / `main` (production).
 - **Release:** merge `develop` → `main`, bump version, move `Unreleased` to the new version in `CHANGELOG.md`, sync `readme.txt`, commit `Release vX.Y.Z`, tag `vX.Y.Z`. `release.yml` builds a clean zip (no `.git`, `.github`, `tests`, `docs`, dev config, dev dependencies) and creates the GitHub Release with that version's changelog section as body.
 - **Release notes:** `CHANGELOG.md`, Keep a Changelog format; every behaviour change adds an entry under Added / Changed / Fixed / Removed / **Security**.
