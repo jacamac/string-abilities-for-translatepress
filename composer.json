@@ -1,0 +1,47 @@
+{
+    "name": "jacamac/string-abilities-for-translatepress",
+    "description": "WordPress abilities for reading, reviewing and correcting TranslatePress string translations.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "authors": [
+        {
+            "name": "jacamac",
+            "homepage": "https://github.com/jacamac"
+        }
+    ],
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "squizlabs/php_codesniffer": "^3.13",
+        "wp-coding-standards/wpcs": "^3.1",
+        "phpstan/phpstan": "^2.1",
+        "szepeviktor/phpstan-wordpress": "^2.0",
+        "php-stubs/wordpress-stubs": "^6.9",
+        "phpunit/phpunit": "^10.5"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "StringAbilities\\": "src/",
+            "StringAbilities\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "phpcs": "./vendor/bin/phpcs",
+        "phpcbf": "./vendor/bin/phpcbf",
+        "phpstan": "./vendor/bin/phpstan analyse --memory-limit=512M",
+        "test": "./vendor/bin/phpunit",
+        "lint": [
+            "@phpcs",
+            "@phpstan"
+        ]
+    },
+    "config": {
+        "platform": {
+            "php": "8.1.0"
+        },
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    }
+}
