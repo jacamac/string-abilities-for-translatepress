@@ -149,6 +149,8 @@ Warnings (never block):
 - `sat_identical_to_original` — translation equals the original (likely missed translation).
 - `sat_protected_term_missing` — a `protected_terms` entry present in the original is absent or altered in the translation (case-sensitive).
 
+Before validation, a bare `&` (not starting a valid HTML entity) in `translated` is converted to `&amp;` (`Validator::encode_ampersands()`), reported as warning `sat_ampersand_encoded`.
+
 Raised outside `Validator`: `sat_sanitization_changed` (error), `sat_duplicate_rows` (warning). Ability-level errors (`WP_Error`): `sat_invalid_language`, `sat_invalid_input` (e.g. both or neither of `original_ids` / `originals`), `sat_not_found`, `sat_writes_disabled`, `sat_schema_unsupported`.
 
 ### 5.4 Text normalisation (pure PHP, unit-tested)
@@ -188,7 +190,7 @@ Scope may shrink after the discovery (e.g. leave plurals read-only) — any redu
 
 ## 6. Data
 
-One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `user_id`, `language`, `original_id`, `action` (`translate`|`approve`|`reset`|`revert`), `old_value`, `old_status`, `new_value`, `new_status`, `note`, `reverted_by` (nullable). `dbDelta` on activation; option `sat_db_version`.
+One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `user_id`, `language`, `original_id`, `row_id` (dictionary row written; revert targets it with the same conditional `UPDATE`, never a row found by value), `action` (`translate`|`approve`|`reset`|`revert`), `old_value`, `old_status`, `new_value`, `new_status`, `note`, `reverted_by` (nullable). `dbDelta` on activation; option `sat_db_version`.
 
 `uninstall.php` drops the table and plugin options and removes the `translation_agent` role and the plugin's capabilities. Never touches TranslatePress tables.
 
@@ -197,7 +199,7 @@ One table `{prefix}sat_changes`: `id`, `batch_id` (UUID), `created_at` (UTC), `u
 ## 7. Security
 
 1. Capabilities `sat_read`, `sat_manage`. Activation creates role `translation_agent` (`read`, `sat_read`, `sat_manage`) and grants both caps to `administrator`. Each `permission_callback` checks its cap. Never `manage_options`.
-2. Read-only switch: constant `SAT_READ_ONLY` or option `sat_read_only` → write abilities return `sat_writes_disabled`. This and `sat_schema_unsupported` are returned from the **execute** callback: a `WP_Error` from a permission callback is replaced by a generic error (SCHEMA §12). Permission callbacks only check capabilities.
+2. Read-only switch: constant `SAT_READ_ONLY` or option `sat_read_only` → `revert` and real writes of `update-translations` return `sat_writes_disabled`; dry runs stay allowed and report `writes_disabled: true` (owner, Stage 2). This and `sat_schema_unsupported` are returned from the **execute** callback: a `WP_Error` from a permission callback is replaced by a generic error (SCHEMA §12). Permission callbacks only check capabilities.
 3. HTML and placeholder validation per §5.3 (stored-XSS protection: translations render publicly).
 4. Limits per §5. SQL only via `$wpdb->prepare`; table names built only from the validated list of configured languages.
 5. Schema guard: on first use per TranslatePress version, check expected columns (cached). Mismatch → writes return `sat_schema_unsupported`; reads still work if their columns exist.
@@ -231,7 +233,7 @@ If a file passes ~300 lines, reconsider before splitting. Ability callbacks are 
 ## 9. Testing — the whole budget
 
 **Automated (PHPUnit on plain PHP, seconds, no WordPress):** `ValidatorTest`, ~15 cases:
-identical markup passes · added `<script>` · added `onclick` · changed `href` · dropped tag · renamed attribute · placeholder count · invalid UTF-8 · over-length · invented number · dropped number · identical to original · protected term missing · protected term present · plain text passes; plus `normalize()`: entity vs literal · typographic vs straight apostrophe · non-breaking vs plain space · accents preserved.
+identical markup passes · added `<script>` · added `onclick` · changed `href` · dropped tag · renamed attribute · placeholder count · invalid UTF-8 · over-length · invented number · dropped number · identical to original · protected term missing · protected term present · plain text passes · bare `&` encoded (owner, Stage 2); plus `normalize()`: entity vs literal · typographic vs straight apostrophe · non-breaking vs plain space · accents preserved.
 
 Add a pure-function test for write rules (conflict, overwrite_reviewed, approve on untranslated) **only** if Stage 0 shows they can be isolated without WordPress. Never build WordPress mocks.
 

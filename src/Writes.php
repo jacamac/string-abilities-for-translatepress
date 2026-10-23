@@ -47,7 +47,7 @@ final class Writes {
 		Plugin::register(
 			'update-translations',
 			__( 'Update translations', 'string-abilities-for-translatepress' ),
-			'Translate, approve or reset strings, in several languages in one call. dry_run defaults to true: nothing is written until you repeat the call with dry_run false. Each item needs expected_current, the translation as you last read it (empty if untranslated); if it changed since, the item is a conflict and nothing is written. Changing or resetting a human translation needs overwrite_reviewed true. translate stores the text as human; approve turns a machine translation into human without changing it; reset makes the string untranslated, and with automatic translation on (and manual_only off) TranslatePress machine-translates it again on its next page view. Translations are checked against the original (HTML, printf placeholders, numbers, protected_terms) and must survive TranslatePress\'s sanitising unchanged (e.g. write & as &amp; when the original does). A string with no row yet in a language cannot be written (sat_not_found): TranslatePress creates the row when a page showing it is viewed in that language. Full-page caches still show the old text until purged. ' . Plugin::UNTRUSTED,
+			'Translate, approve or reset strings, in several languages in one call. dry_run defaults to true: nothing is written until you repeat the call with dry_run false. Each item needs expected_current, the translation as you last read it (empty if untranslated); if it changed since, the item is a conflict and nothing is written. Changing or resetting a human translation needs overwrite_reviewed true. translate stores the text as human; approve turns a machine translation into human without changing it; reset makes the string untranslated, and with automatic translation on (and manual_only off) TranslatePress machine-translates it again on its next page view. Translations are checked against the original (HTML, printf placeholders, numbers, protected_terms) and must survive TranslatePress\'s sanitising unchanged; a bare & is stored as &amp; (warning sat_ampersand_encoded). In read-only mode only dry runs are allowed, and writes_disabled is true. A string with no row yet in a language cannot be written (sat_not_found): TranslatePress creates the row when a page showing it is viewed in that language. Full-page caches still show the old text until purged. ' . Plugin::UNTRUSTED,
 			Plugin::input(
 				array(
 					'items'           => array(
@@ -106,12 +106,16 @@ final class Writes {
 			array(
 				'type'       => 'object',
 				'properties' => array(
-					'dry_run'  => array( 'type' => 'boolean' ),
-					'batch_id' => array(
+					'dry_run'         => array( 'type' => 'boolean' ),
+					'writes_disabled' => array(
+						'type'        => 'boolean',
+						'description' => 'Read-only mode is on: only dry runs are possible.',
+					),
+					'batch_id'        => array(
 						'type'        => 'string',
 						'description' => 'Only when something was written.',
 					),
-					'items'    => array(
+					'items'           => array(
 						'type'  => 'array',
 						'items' => Plugin::object(
 							array(
@@ -129,7 +133,7 @@ final class Writes {
 						),
 					),
 				),
-				'required'   => array( 'dry_run', 'items' ),
+				'required'   => array( 'dry_run', 'writes_disabled', 'items' ),
 			),
 			array( self::class, 'update_translations' ),
 			true
@@ -138,7 +142,7 @@ final class Writes {
 		Plugin::register(
 			'revert',
 			__( 'Revert changes', 'string-abilities-for-translatepress' ),
-			'Undo one change (change_id) or a whole batch (batch_id) made by this plugin: restores the previous translation and status. A change whose string was modified since is a conflict and left alone; one already reverted is unchanged. Each restoration is logged as a new change in a new batch. Pass exactly one of change_id or batch_id. ' . Plugin::UNTRUSTED,
+			'Undo one change (change_id) or a whole batch (batch_id) made by this plugin: restores the previous translation and status on the exact row it wrote. A change whose row was modified since is a conflict and left alone; one already reverted is unchanged. Each restoration is logged as a new change in a new batch. Pass exactly one of change_id or batch_id. ' . Plugin::UNTRUSTED,
 			Plugin::input(
 				array(
 					'change_id' => array(
@@ -220,6 +224,7 @@ final class Writes {
 								'user_id'     => array( 'type' => 'integer' ),
 								'language'    => array( 'type' => 'string' ),
 								'original_id' => array( 'type' => 'integer' ),
+								'row_id'      => array( 'type' => 'integer' ),
 								'action'      => array( 'type' => 'string' ),
 								'old_value'   => array( 'type' => 'string' ),
 								'old_status'  => Plugin::STATUS,
@@ -249,12 +254,16 @@ final class Writes {
 		$input   = (array) $input;
 		$strings = new Strings();
 		$items   = array_values( array_map( static fn( $item ): array => (array) $item, (array) ( $input['items'] ?? array() ) ) );
-		$error   = self::write_error( $strings ) ?? self::items_error( $strings, $items );
+		// Core fills no nested defaults (SCHEMA §12): dry run unless explicitly false.
+		$dry_run   = isset( $input['dry_run'] ) ? self::flag( $input['dry_run'] ) : true;
+		$read_only = self::read_only();
+		if ( $read_only && ! $dry_run ) {
+			return self::writes_disabled();
+		}
+		$error = self::write_error( $strings ) ?? self::items_error( $strings, $items );
 		if ( $error ) {
 			return $error;
 		}
-		// Core fills no nested defaults (SCHEMA §12): dry run unless explicitly false.
-		$dry_run  = isset( $input['dry_run'] ) ? self::flag( $input['dry_run'] ) : true;
 		$terms    = array_values( array_map( 'strval', (array) ( $input['protected_terms'] ?? array() ) ) );
 		$note     = mb_substr( (string) ( $input['note'] ?? '' ), 0, 200 );
 		$batch_id = wp_generate_uuid4();
@@ -270,7 +279,10 @@ final class Writes {
 			$results[] = $result;
 		}
 
-		$output = array( 'dry_run' => $dry_run );
+		$output = array(
+			'dry_run'         => $dry_run,
+			'writes_disabled' => $read_only,
+		);
 		if ( $written ) {
 			$output['batch_id'] = $batch_id;
 		}
@@ -288,6 +300,9 @@ final class Writes {
 		$input = (array) $input;
 		if ( isset( $input['change_id'] ) === isset( $input['batch_id'] ) ) {
 			return new WP_Error( 'sat_invalid_input', __( 'Pass exactly one of change_id or batch_id.', 'string-abilities-for-translatepress' ), array( 'status' => 400 ) );
+		}
+		if ( self::read_only() ) {
+			return self::writes_disabled();
 		}
 		$strings = new Strings();
 		$error   = self::write_error( $strings );
@@ -359,6 +374,7 @@ final class Writes {
 				'user_id'     => (int) $row['user_id'],
 				'language'    => (string) $row['language'],
 				'original_id' => (int) $row['original_id'],
+				'row_id'      => (int) $row['row_id'],
 				'action'      => (string) $row['action'],
 				'old_value'   => (string) $row['old_value'],
 				'old_status'  => Strings::status_label( (int) $row['old_status'] ),
@@ -418,6 +434,13 @@ final class Writes {
 			'approve'   => array( $row['translated'], 2 ),
 			default     => array( '', 0 ), // reset; the schema allows nothing else.
 		};
+		if ( 'translate' === $action ) {
+			$encoded = Validator::encode_ampersands( $translated );
+			if ( $encoded !== $translated ) {
+				$result['warnings'][] = self::issue( 'sat_ampersand_encoded', __( 'Bare & converted to &amp;, as TranslatePress stores it.', 'string-abilities-for-translatepress' ) );
+				$translated           = $encoded;
+			}
+		}
 		$result['new']    = self::value( $translated, $status );
 		$result['errors'] = self::rule_errors( $action, $row, $translated, self::flag( $item['overwrite_reviewed'] ?? false ) );
 		if ( 'translate' === $action && '' !== $translated ) {
@@ -496,6 +519,7 @@ final class Writes {
 			array(
 				'language'    => $result['language'],
 				'original_id' => $result['original_id'],
+				'row_id'      => $row['id'],
 				'old_value'   => $row['translated'],
 				'old_status'  => $row['status'],
 				'new_value'   => $write['translated'],
@@ -507,8 +531,9 @@ final class Writes {
 	}
 
 	/**
-	 * Restore the previous value and status of one change, if its row still
-	 * holds what the change wrote, and log the restoration.
+	 * Restore the previous value and status of one change on the row it wrote,
+	 * if that row still holds what the change wrote, and log the restoration.
+	 * Never locates a row by value: duplicate rows often hold the same text.
 	 *
 	 * @param Strings              $strings   Data access.
 	 * @param string[]             $languages Configured translation languages.
@@ -521,8 +546,8 @@ final class Writes {
 		$original_id = (int) $change['original_id'];
 		$current     = (string) $change['new_value'];
 		$status      = (int) $change['new_status'];
-		$row_id      = in_array( $language, $languages, true ) ? $strings->row_holding( $language, $original_id, $current, $status ) : null;
-		if ( null === $row_id || ! $strings->update_row( $language, $row_id, $original_id, $current, $status, (string) $change['old_value'], (int) $change['old_status'] ) ) {
+		$row_id      = (int) $change['row_id'];
+		if ( 0 === $row_id || ! in_array( $language, $languages, true ) || ! $strings->update_row( $language, $row_id, $original_id, $current, $status, (string) $change['old_value'], (int) $change['old_status'] ) ) {
 			return false;
 		}
 		$id = ChangeLog::record(
@@ -531,6 +556,7 @@ final class Writes {
 			array(
 				'language'    => $language,
 				'original_id' => $original_id,
+				'row_id'      => $row_id,
 				'old_value'   => $current,
 				'old_status'  => $status,
 				'new_value'   => (string) $change['old_value'],
@@ -543,17 +569,32 @@ final class Writes {
 	}
 
 	/**
-	 * Error if writes are disabled or the schema is not recognised. Returned
-	 * from the execute callback: the Abilities API replaces permission-callback
-	 * errors with a generic one (SCHEMA §12).
+	 * Whether read-only mode is on (constant SAT_READ_ONLY or option sat_read_only).
+	 *
+	 * @return bool
+	 */
+	private static function read_only(): bool {
+		return ( defined( 'SAT_READ_ONLY' ) && constant( 'SAT_READ_ONLY' ) ) || self::flag( get_option( self::READ_ONLY_OPTION, false ) );
+	}
+
+	/**
+	 * Error for a real write in read-only mode. Returned from the execute
+	 * callback: the Abilities API replaces permission-callback errors with a
+	 * generic one (SCHEMA §12).
+	 *
+	 * @return WP_Error
+	 */
+	private static function writes_disabled(): WP_Error {
+		return new WP_Error( 'sat_writes_disabled', __( 'Writes are disabled: read-only mode is on (SAT_READ_ONLY or the sat_read_only option). Dry runs still work.', 'string-abilities-for-translatepress' ), array( 'status' => 403 ) );
+	}
+
+	/**
+	 * Error if the schema is not recognised; installs the change log if needed.
 	 *
 	 * @param Strings $strings Data access.
 	 * @return WP_Error|null
 	 */
 	private static function write_error( Strings $strings ): ?WP_Error {
-		if ( ( defined( 'SAT_READ_ONLY' ) && constant( 'SAT_READ_ONLY' ) ) || self::flag( get_option( self::READ_ONLY_OPTION, false ) ) ) {
-			return new WP_Error( 'sat_writes_disabled', __( 'Writes are disabled: read-only mode is on (SAT_READ_ONLY or the sat_read_only option).', 'string-abilities-for-translatepress' ), array( 'status' => 403 ) );
-		}
 		ChangeLog::maybe_install();
 		return $strings->schema_error();
 	}

@@ -132,6 +132,16 @@ final class ValidatorTest extends TestCase {
 	}
 
 	/**
+	 * A bare & becomes &amp;; valid named and numeric entities are kept.
+	 */
+	public function testBareAmpersandIsEncoded(): void {
+		$this->assertSame(
+			'Fish &amp; chips &amp;co &amp;fake; &amp; &#8217; &#x2019; &nbsp;',
+			Validator::encode_ampersands( 'Fish & chips &co &fake; &amp; &#8217; &#x2019; &nbsp;' )
+		);
+	}
+
+	/**
 	 * Plain text without markup, numbers or placeholders passes.
 	 */
 	public function testPlainTextPasses(): void {

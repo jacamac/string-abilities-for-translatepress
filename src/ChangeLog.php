@@ -18,7 +18,7 @@ final class ChangeLog {
 	/**
 	 * Schema version of the table, stored in the sat_db_version option.
 	 */
-	public const DB_VERSION = '1';
+	public const DB_VERSION = '2';
 
 	/**
 	 * Option holding the installed schema version.
@@ -50,6 +50,7 @@ final class ChangeLog {
 			user_id bigint(20) unsigned NOT NULL DEFAULT 0,
 			language varchar(20) NOT NULL,
 			original_id bigint(20) unsigned NOT NULL,
+			row_id bigint(20) unsigned NOT NULL DEFAULT 0,
 			action varchar(20) NOT NULL,
 			old_value longtext NOT NULL,
 			old_status int(11) NOT NULL,
@@ -80,7 +81,7 @@ final class ChangeLog {
 	 *
 	 * @param string               $batch_id Batch UUID.
 	 * @param string               $action   translate, approve, reset or revert.
-	 * @param array<string, mixed> $change   language, original_id, old_value, old_status, new_value, new_status, note.
+	 * @param array<string, mixed> $change   language, original_id, row_id (dictionary row written), old_value, old_status, new_value, new_status, note.
 	 * @return int Change id.
 	 */
 	public static function record( string $batch_id, string $action, array $change ): int {
@@ -93,6 +94,7 @@ final class ChangeLog {
 				'user_id'     => get_current_user_id(),
 				'language'    => (string) $change['language'],
 				'original_id' => (int) $change['original_id'],
+				'row_id'      => (int) $change['row_id'],
 				'action'      => $action,
 				'old_value'   => (string) $change['old_value'],
 				'old_status'  => (int) $change['old_status'],
@@ -100,7 +102,7 @@ final class ChangeLog {
 				'new_status'  => (int) $change['new_status'],
 				'note'        => (string) $change['note'],
 			),
-			array( '%s', '%s', '%d', '%s', '%d', '%s', '%s', '%d', '%s', '%d', '%s' )
+			array( '%s', '%s', '%d', '%s', '%d', '%d', '%s', '%s', '%d', '%s', '%d', '%s' )
 		);
 		return (int) $wpdb->insert_id;
 	}

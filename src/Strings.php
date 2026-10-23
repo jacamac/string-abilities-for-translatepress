@@ -329,25 +329,6 @@ final class Strings {
 	}
 
 	/**
-	 * First row of an original in one language that still holds a given
-	 * translation and status (used by revert).
-	 *
-	 * @param string $language    Validated language code.
-	 * @param int    $original_id Original id.
-	 * @param string $translated  Translation the row must hold (NULL counts as '').
-	 * @param int    $status      Status the row must hold.
-	 * @return int|null Row id, or null if no row matches.
-	 */
-	public function row_holding( string $language, int $original_id, string $translated, int $status ): ?int {
-		foreach ( $this->rows_by_original( $language, array( $original_id ) )[ $original_id ] ?? array() as $row ) {
-			if ( (string) ( $row['translated'] ?? '' ) === $translated && (int) $row['status'] === $status ) {
-				return (int) $row['id'];
-			}
-		}
-		return null;
-	}
-
-	/**
 	 * Change the translation and status of one dictionary row, only if it still
 	 * holds the expected translation and status (SCHEMA §5). One UPDATE that
 	 * can never insert; original and block_type are never written.

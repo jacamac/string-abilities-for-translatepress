@@ -8,11 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Added
 - Write abilities `update-translations` (translate / approve / reset, dry run by default, `expected_current`, `overwrite_reviewed`, `protected_terms`, `note`, `batch_id`) and `revert` (by `change_id` or `batch_id`), plus `get-change-log`. Each write is one conditional `UPDATE` of the displayed row; strings without a row in a language are rejected with `sat_not_found`; text that `wp_kses` or TranslatePress's sanitising would alter is rejected with `sat_sanitization_changed`.
 - Change-log table `{prefix}sat_changes` (`dbDelta`, option `sat_db_version`), created on activation or on first use after an update; `uninstall.php` drops it.
-- Read-only switch: constant `SAT_READ_ONLY` or option `sat_read_only` makes `update-translations` and `revert` return `sat_writes_disabled`.
+- Read-only switch: constant `SAT_READ_ONLY` or option `sat_read_only` makes `revert` and real `update-translations` writes return `sat_writes_disabled`; dry runs stay allowed and report `writes_disabled: true`.
+- A bare `&` in a translation is converted to `&amp;` before validation, with warning `sat_ampersand_encoded`.
+- Change log column `row_id` (`sat_db_version` 2): `revert` restores the exact row written, with the same conditional `UPDATE`; a row is never located by its text.
 - `Validator::check()`: errors `sat_html_mismatch`, `sat_placeholder_mismatch`, `sat_too_long`, `sat_invalid_utf8`; warnings `sat_numbers_mismatch`, `sat_identical_to_original`, `sat_protected_term_missing`; with unit tests.
 
 ### Changed
-- `dev-latest` builds are stamped `X.Y.Z-dev.<run>` in the zip only, with the committed version set to the next release, so a test site following `develop` is offered every build and the release replaces them.
+- `dev-latest` builds are stamped `X.Y.Z-dev.<run>` in the zip only, with the committed version set to the next release, so a test site following `develop` is offered every build and the release replaces them. In branch mode the latest dev build stays offered even once installed (README).
 
 ## [0.1.0] - 2026-10-23
 

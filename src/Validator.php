@@ -119,6 +119,27 @@ final class Validator {
 	}
 
 	/**
+	 * Encode every & that does not start a valid HTML entity as &amp;, as
+	 * TranslatePress's sanitising (wp_kses) would.
+	 *
+	 * @param string $text Text.
+	 * @return string
+	 */
+	public static function encode_ampersands( string $text ): string {
+		return (string) preg_replace_callback(
+			'/&(?:#\d+;|#x[0-9a-f]+;|[a-z][a-z0-9]*;)?/i',
+			static function ( array $found ): string {
+				$entity = $found[0];
+				if ( '&' === $entity || html_entity_decode( $entity, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) === $entity ) {
+					return '&amp;' . substr( $entity, 1 );
+				}
+				return $entity;
+			},
+			$text
+		);
+	}
+
+	/**
 	 * The wp_kses allowlist of an original: its tags with their attributes.
 	 *
 	 * @param string $original Original as stored by TranslatePress.
