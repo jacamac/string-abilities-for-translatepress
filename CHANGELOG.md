@@ -12,6 +12,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Schema guard covers the gettext tables and their unique `(original_id, plural_form)` index; a mismatch only disables gettext (the index only gettext writes).
 - `Validator::check()` gettext mode: `sat_placeholder_mismatch` uses TranslatePress's own rule (same tokens, any order), so a translation TranslatePress would silently ignore is rejected; with unit tests.
 
+### Fixed
+- Every `source: gettext` call failed with `Class "StringAbilities\Gettext" not found`: the plugin bootstrap did not load `src/Gettext.php`. CI (`bin/check-version.sh`) now fails if any file in `src/` is not `require_once`d by the main plugin file.
+
 ### Changed
 - `update-translations` and `revert` items include `source` (and `plural_form` for gettext).
 
