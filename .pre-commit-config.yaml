@@ -1,0 +1,16 @@
+# Local leak checks, the same as CI. Install once with `pre-commit install`.
+# The private-terms hook reads the git-ignored .private-terms file.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: private-terms
+        name: private terms
+        entry: bin/check-private-terms.sh
+        language: script
+        pass_filenames: false
+        always_run: true

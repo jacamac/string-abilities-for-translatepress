@@ -1,0 +1,20 @@
+includes:
+    - vendor/szepeviktor/phpstan-wordpress/extension.neon
+
+parameters:
+    level: 6
+
+    paths:
+        - string-abilities-for-translatepress.php
+        - uninstall.php
+        - src/
+        - tests/
+
+    # Minimal declarations of the TranslatePress classes the plugin calls.
+    # Analysis only; never loaded at runtime or by PHPUnit.
+    scanFiles:
+        - tests/stubs/translatepress.php
+
+    excludePaths:
+        - vendor/
+        - tests/stubs/
