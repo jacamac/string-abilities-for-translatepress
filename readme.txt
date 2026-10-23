@@ -26,6 +26,8 @@ Abilities:
 * `revert` – undo one change or a whole batch.
 * `get-change-log` – history of the changes.
 
+`get-stats`, `search-strings`, `get-strings`, `update-translations` and `get-change-log` also work on plugin and theme strings (`source: gettext`).
+
 Reads are plain database queries: they never trigger machine translation or create rows. Writes only update existing rows; they never insert or delete TranslatePress rows or touch source text. Define `SAT_READ_ONLY` to disable writes. The full reference is in README.md on GitHub.
 
 Requires TranslatePress – Multilingual (free). Paid add-ons are not required.
