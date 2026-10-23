@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- `Validator::check()`: errors `sat_html_mismatch`, `sat_placeholder_mismatch`, `sat_too_long`, `sat_invalid_utf8`; warnings `sat_numbers_mismatch`, `sat_identical_to_original`, `sat_protected_term_missing`; with unit tests.
+
 ### Changed
 - `dev-latest` builds are stamped `X.Y.Z-dev.<run>` in the zip only, with the committed version set to the next release, so a test site following `develop` is offered every build and the release replaces them.
 
